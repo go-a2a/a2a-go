@@ -12,6 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func init() {
+	uuid.EnableRandPool()
+}
+
 // Version is the current version of the A2A protocol.
 const Version = "0.1.0"
 
@@ -306,7 +310,7 @@ type TaskBuilder struct {
 func NewTaskBuilder() *TaskBuilder {
 	return &TaskBuilder{
 		task: Task{
-			ID:        uuid.New().String(),
+			ID:        uuid.NewString(),
 			State:     TaskStateSubmitted,
 			Messages:  make([]Message, 0),
 			Artifacts: make([]Artifact, 0),
@@ -344,7 +348,7 @@ func (b *TaskBuilder) AddMessage(message Message) *TaskBuilder {
 // AddArtifact adds an Artifact to the Task.
 func (b *TaskBuilder) AddArtifact(artifact Artifact) *TaskBuilder {
 	if artifact.ID == "" {
-		artifact.ID = uuid.New().String()
+		artifact.ID = uuid.NewString()
 	}
 	if artifact.CreatedAt.IsZero() {
 		artifact.CreatedAt = time.Now().UTC()
@@ -439,7 +443,7 @@ func NewArtifactBuilder(artifactType string) *ArtifactBuilder {
 	now := time.Now().UTC()
 	return &ArtifactBuilder{
 		artifact: Artifact{
-			ID:        uuid.New().String(),
+			ID:        uuid.NewString(),
 			Type:      artifactType,
 			Parts:     make([]Part, 0),
 			Index:     make(map[string]any),
