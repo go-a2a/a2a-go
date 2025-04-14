@@ -15,6 +15,14 @@ import (
 // Version is the current version of the A2A protocol.
 const Version = "0.1.0"
 
+// Request is an interface implemented by all request types in the A2A protocol.
+type Request interface {
+	request()
+
+	// Validate validates the request and returns an error if it is invalid.
+	Validate() error
+}
+
 // TaskState represents the state of a Task.
 type TaskState string
 
@@ -100,6 +108,21 @@ type SendTaskRequest struct {
 	Task Task `json:"task"`
 }
 
+var _ Request = (*SendTaskRequest)(nil)
+
+func (SendTaskRequest) request() {}
+
+// Validate validates the SendTaskRequest.
+func (r SendTaskRequest) Validate() error {
+	if r.Task.ID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if len(r.Task.Messages) == 0 {
+		return fmt.Errorf("task must have at least one message")
+	}
+	return nil
+}
+
 // SendTaskResponse represents a response to a SendTaskRequest.
 type SendTaskResponse struct {
 	Task      Task   `json:"task"`
@@ -110,6 +133,18 @@ type SendTaskResponse struct {
 type GetTaskRequest struct {
 	TaskID    string `json:"taskId"`
 	RequestID string `json:"requestId,omitempty"`
+}
+
+var _ Request = (*GetTaskRequest)(nil)
+
+func (GetTaskRequest) request() {}
+
+// Validate validates the GetTaskRequest.
+func (r GetTaskRequest) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	return nil
 }
 
 // GetTaskResponse represents a response to a GetTaskRequest.
@@ -124,10 +159,116 @@ type CancelTaskRequest struct {
 	RequestID string `json:"requestId,omitempty"`
 }
 
+var _ Request = (*CancelTaskRequest)(nil)
+
+func (CancelTaskRequest) request() {}
+
+// Validate validates the CancelTaskRequest.
+func (r CancelTaskRequest) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	return nil
+}
+
 // CancelTaskResponse represents a response to a CancelTaskRequest.
 type CancelTaskResponse struct {
 	Task      Task   `json:"task"`
 	RequestID string `json:"requestId"`
+}
+
+// TaskPushNotificationConfig represents the configuration for push notifications for a task.
+type TaskPushNotificationConfig struct {
+	TaskID                 string                 `json:"taskId"`
+	PushNotificationConfig PushNotificationConfig `json:"pushNotificationConfig"`
+}
+
+// PushNotificationConfig represents the configuration for push notifications.
+type PushNotificationConfig struct {
+	URL            string              `json:"url"`
+	Token          string              `json:"token,omitempty"`
+	Authentication *AuthenticationInfo `json:"authentication,omitempty"`
+}
+
+// AuthenticationInfo represents authentication information for push notifications.
+type AuthenticationInfo struct {
+	Schemes     []string       `json:"schemes"`
+	Credentials string         `json:"credentials,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// SetTaskPushNotificationRequest represents a request to set push notification configuration for a task.
+type SetTaskPushNotificationRequest struct {
+	TaskID                 string                 `json:"taskId"`
+	PushNotificationConfig PushNotificationConfig `json:"pushNotificationConfig"`
+}
+
+var _ Request = (*SetTaskPushNotificationRequest)(nil)
+
+func (SetTaskPushNotificationRequest) request() {}
+
+// Validate validates the SetTaskPushNotificationRequest.
+func (r SetTaskPushNotificationRequest) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if r.PushNotificationConfig.URL == "" {
+		return fmt.Errorf("push notification URL cannot be empty")
+	}
+	return nil
+}
+
+// GetTaskPushNotificationRequest represents a request to get push notification configuration for a task.
+type GetTaskPushNotificationRequest struct {
+	TaskID    string         `json:"taskId"`
+	RequestID string         `json:"requestId,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+var _ Request = (*GetTaskPushNotificationRequest)(nil)
+
+func (GetTaskPushNotificationRequest) request() {}
+
+// Validate validates the GetTaskPushNotificationRequest.
+func (r GetTaskPushNotificationRequest) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	return nil
+}
+
+// TaskResubscriptionRequest represents a request to resubscribe to a task's updates.
+type TaskResubscriptionRequest struct {
+	TaskID        string         `json:"taskId"`
+	HistoryLength int            `json:"historyLength,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
+var _ Request = (*TaskResubscriptionRequest)(nil)
+
+func (TaskResubscriptionRequest) request() {}
+
+// Validate validates the TaskResubscriptionRequest.
+func (r TaskResubscriptionRequest) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task ID cannot be empty")
+	}
+	if r.HistoryLength < 0 {
+		return fmt.Errorf("history length cannot be negative")
+	}
+	return nil
+}
+
+// SetTaskPushNotificationResponse represents a response to a SetTaskPushNotificationRequest.
+type SetTaskPushNotificationResponse struct {
+	Config    TaskPushNotificationConfig `json:"config"`
+	RequestID string                     `json:"requestId"`
+}
+
+// GetTaskPushNotificationResponse represents a response to a GetTaskPushNotificationRequest.
+type GetTaskPushNotificationResponse struct {
+	Config    TaskPushNotificationConfig `json:"config"`
+	RequestID string                     `json:"requestId"`
 }
 
 // TaskStatusUpdateEvent represents an event sent when a task's status changes.
@@ -138,16 +279,22 @@ type TaskStatusUpdateEvent struct {
 
 // Client represents an A2A client.
 type Client interface {
-	SendTask(ctx context.Context, req SendTaskRequest) (*SendTaskResponse, error)
-	GetTask(ctx context.Context, req GetTaskRequest) (*GetTaskResponse, error)
-	CancelTask(ctx context.Context, req CancelTaskRequest) (*CancelTaskResponse, error)
+	SendTask(ctx context.Context, req Request) (*SendTaskResponse, error)
+	GetTask(ctx context.Context, req Request) (*GetTaskResponse, error)
+	CancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error)
+	SetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error)
+	GetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error)
+	ResubscribeTask(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error)
 }
 
 // Server represents an A2A server.
 type Server interface {
-	HandleSendTask(ctx context.Context, req SendTaskRequest) (*SendTaskResponse, error)
-	HandleGetTask(ctx context.Context, req GetTaskRequest) (*GetTaskResponse, error)
-	HandleCancelTask(ctx context.Context, req CancelTaskRequest) (*CancelTaskResponse, error)
+	HandleSendTask(ctx context.Context, req Request) (*SendTaskResponse, error)
+	HandleGetTask(ctx context.Context, req Request) (*GetTaskResponse, error)
+	HandleCancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error)
+	HandleSetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error)
+	HandleGetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error)
+	HandleTaskResubscription(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error)
 }
 
 // TaskBuilder helps build a Task with a fluent API.
@@ -374,6 +521,10 @@ func RunTask(ctx context.Context, client Client, task Task, opts TaskOptions) (*
 		Task: task,
 	}
 
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid task request: %w", err)
+	}
+
 	resp, err := client.SendTask(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("send task: %w", err)
@@ -385,6 +536,10 @@ func RunTask(ctx context.Context, client Client, task Task, opts TaskOptions) (*
 		getReq := GetTaskRequest{
 			TaskID:    task.ID,
 			RequestID: resp.RequestID,
+		}
+
+		if err := getReq.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid get task request: %w", err)
 		}
 
 		getResp, err := client.GetTask(ctx, getReq)
