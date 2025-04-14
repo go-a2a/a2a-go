@@ -95,7 +95,7 @@ func makeRequest(method string, params any, id string) ([]byte, error) {
 		ID:      id,
 	}
 
-	return sonic.Marshal(req)
+	return sonic.ConfigFastest.Marshal(req)
 }
 
 // sendRequest makes an HTTP request to the A2A server.
@@ -174,7 +174,7 @@ func (c *A2AClient) SendTask(ctx context.Context, req Request) (*SendTaskRespons
 		Error   json.RawMessage `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -183,7 +183,7 @@ func (c *A2AClient) SendTask(ctx context.Context, req Request) (*SendTaskRespons
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
@@ -226,7 +226,7 @@ func (c *A2AClient) GetTask(ctx context.Context, req Request) (*GetTaskResponse,
 		Error   json.RawMessage `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -235,7 +235,7 @@ func (c *A2AClient) GetTask(ctx context.Context, req Request) (*GetTaskResponse,
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
@@ -278,7 +278,7 @@ func (c *A2AClient) CancelTask(ctx context.Context, req Request) (*CancelTaskRes
 		Error   json.RawMessage `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -287,7 +287,7 @@ func (c *A2AClient) CancelTask(ctx context.Context, req Request) (*CancelTaskRes
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
@@ -331,7 +331,7 @@ func (c *A2AClient) SetTaskPushNotification(ctx context.Context, req Request) (*
 		Error   json.RawMessage            `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -340,7 +340,7 @@ func (c *A2AClient) SetTaskPushNotification(ctx context.Context, req Request) (*
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
@@ -384,7 +384,7 @@ func (c *A2AClient) GetTaskPushNotification(ctx context.Context, req Request) (*
 		Error   json.RawMessage            `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -393,7 +393,7 @@ func (c *A2AClient) GetTaskPushNotification(ctx context.Context, req Request) (*
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
@@ -438,7 +438,7 @@ func (c *A2AClient) ResubscribeTask(ctx context.Context, req Request) (*TaskStat
 		Error   json.RawMessage       `json:"error"`
 	}
 
-	if err := sonic.Unmarshal(responseData, &jsonRPCResp); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
@@ -447,7 +447,7 @@ func (c *A2AClient) ResubscribeTask(ctx context.Context, req Request) (*TaskStat
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if err := sonic.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
+		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
 			return nil, fmt.Errorf("failed to parse error: %w", err)
 		}
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)

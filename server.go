@@ -122,7 +122,7 @@ func (s *A2AServer) handleAgentCardRequest(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	data, err := sonic.Marshal(s.AgentCard)
+	data, err := sonic.ConfigFastest.Marshal(s.AgentCard)
 	if err != nil {
 		s.Logger.Error("failed to marshal agent card", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -208,7 +208,7 @@ func (s *A2AServer) processRequest(w http.ResponseWriter, r *http.Request) {
 		Result:  result,
 	}
 
-	data, err := sonic.Marshal(resp)
+	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
 		s.Logger.ErrorContext(ctx, "failed to marshal response", "error", err)
 		s.writeError(w, -32603, "Internal error serializing response")
@@ -243,7 +243,7 @@ func (s *A2AServer) writeError(w http.ResponseWriter, code int, message string) 
 		},
 	}
 
-	data, err := sonic.Marshal(resp)
+	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
 		s.Logger.Error("failed to marshal error response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -264,7 +264,7 @@ func (s *A2AServer) handleSendTask(ctx context.Context, params json.RawMessage) 
 	defer span.End()
 
 	var taskParams Task
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -286,7 +286,7 @@ func (s *A2AServer) handleGetTask(ctx context.Context, params json.RawMessage) (
 	var taskParams struct {
 		ID string `json:"id"`
 	}
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -308,7 +308,7 @@ func (s *A2AServer) handleCancelTask(ctx context.Context, params json.RawMessage
 	var taskParams struct {
 		ID string `json:"id"`
 	}
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -328,7 +328,7 @@ func (s *A2AServer) handleSetTaskPushNotification(ctx context.Context, params js
 	defer span.End()
 
 	var config TaskPushNotificationConfig
-	if err := sonic.Unmarshal(params, &config); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &config); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -350,7 +350,7 @@ func (s *A2AServer) handleGetTaskPushNotification(ctx context.Context, params js
 	var taskParams struct {
 		ID string `json:"id"`
 	}
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -373,7 +373,7 @@ func (s *A2AServer) handleTaskResubscription(ctx context.Context, params json.Ra
 		ID            string `json:"id"`
 		HistoryLength int    `json:"historyLength,omitempty"`
 	}
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -393,7 +393,7 @@ func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.Response
 	defer span.End()
 
 	var taskParams Task
-	if err := sonic.Unmarshal(params, &taskParams); err != nil {
+	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
@@ -430,7 +430,7 @@ func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.Response
 			Result:  event,
 		}
 
-		data, err := sonic.Marshal(resp)
+		data, err := sonic.ConfigFastest.Marshal(resp)
 		if err != nil {
 			s.Logger.ErrorContext(ctx, "failed to marshal event", "error", err)
 			continue
