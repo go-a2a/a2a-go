@@ -1,7 +1,7 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package a2a
+package client
 
 import (
 	"bytes"
@@ -16,33 +16,37 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/go-a2a/a2a"
 )
 
 const (
 	defaultTimeout = 30 * time.Second
-	userAgent      = "go-a2a/client " + Version
+	userAgent      = "go-a2a/client " + a2a.Version
 )
 
-// A2AClient is a client for the A2A protocol.
-type A2AClient struct {
-	// HttpClient is the HTTP client used for requests.
-	HttpClient *http.Client
+// Client is a client for the A2A protocol.
+type Client struct {
+	// httpClient is the HTTP client used for requests.
+	httpClient *http.Client
 
-	// URL is the URL of the A2A server.
-	URL string
+	// url is the url of the A2A server.
+	url string
 
-	// AgentCard is the agent card for the client.
-	AgentCard *AgentCard
+	// agentCard is the agent card for the client.
+	agentCard *a2a.AgentCard
 
-	// Logger for logging operations.
-	Logger *slog.Logger
+	// logger for logging operations.
+	logger *slog.Logger
 
-	// Tracer for OpenTelemetry tracing.
-	Tracer trace.Tracer
+	// tracer for OpenTelemetry tracing.
+	tracer trace.Tracer
 }
 
-// NewA2AClient creates a new A2AClient with either an AgentCard or a direct URL.
-func NewA2AClient(agentCard *AgentCard, url string) (*A2AClient, error) {
+var _ a2a.Client = (*Client)(nil)
+
+// NewClient creates a new [Client] with either an [*a2a.AgentCard] or a direct URL.
+func NewClient(agentCard *a2a.AgentCard, url string) (*Client, error) {
 	if agentCard == nil && url == "" {
 		return nil, fmt.Errorf("either agentCard or url must be provided")
 	}
@@ -52,32 +56,32 @@ func NewA2AClient(agentCard *AgentCard, url string) (*A2AClient, error) {
 		clientURL = agentCard.URL
 	}
 
-	return &A2AClient{
-		HttpClient: &http.Client{
+	return &Client{
+		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
-		URL:       clientURL,
-		AgentCard: agentCard,
-		Logger:    slog.Default(),
-		Tracer:    otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
+		url:       clientURL,
+		agentCard: agentCard,
+		logger:    slog.Default(),
+		tracer:    otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
 	}, nil
 }
 
 // WithHTTPClient sets the HTTP client for the A2AClient.
-func (c *A2AClient) WithHTTPClient(httpClient *http.Client) *A2AClient {
-	c.HttpClient = httpClient
+func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
+	c.httpClient = httpClient
 	return c
 }
 
 // WithLogger sets the logger for the A2AClient.
-func (c *A2AClient) WithLogger(logger *slog.Logger) *A2AClient {
-	c.Logger = logger
+func (c *Client) WithLogger(logger *slog.Logger) *Client {
+	c.logger = logger
 	return c
 }
 
 // WithTracer sets the tracer for the A2AClient.
-func (c *A2AClient) WithTracer(tracer trace.Tracer) *A2AClient {
-	c.Tracer = tracer
+func (c *Client) WithTracer(tracer trace.Tracer) *Client {
+	c.tracer = tracer
 	return c
 }
 
@@ -99,8 +103,8 @@ func makeRequest(method string, params any, id string) ([]byte, error) {
 }
 
 // sendRequest makes an HTTP request to the A2A server.
-func (c *A2AClient) sendRequest(ctx context.Context, method string, params any, id string) ([]byte, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.sendRequest",
+func (c *Client) sendRequest(ctx context.Context, method string, params any, id string) ([]byte, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.sendRequest",
 		trace.WithAttributes(
 			attribute.String("a2a.method", method),
 			attribute.String("a2a.request_id", id),
@@ -109,13 +113,13 @@ func (c *A2AClient) sendRequest(ctx context.Context, method string, params any, 
 
 	data, err := makeRequest(method, params, id)
 	if err != nil {
-		c.Logger.ErrorContext(ctx, "failed to create request", "error", err)
+		c.logger.ErrorContext(ctx, "failed to create request", "error", err)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
 	if err != nil {
-		c.Logger.ErrorContext(ctx, "failed to create HTTP request", "error", err)
+		c.logger.ErrorContext(ctx, "failed to create HTTP request", "error", err)
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
@@ -123,15 +127,15 @@ func (c *A2AClient) sendRequest(ctx context.Context, method string, params any, 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := c.HttpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		c.Logger.ErrorContext(ctx, "failed to send HTTP request", "error", err)
+		c.logger.ErrorContext(ctx, "failed to send HTTP request", "error", err)
 		return nil, fmt.Errorf("failed to send HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		c.Logger.ErrorContext(ctx, "HTTP request failed", "status", resp.Status)
+		c.logger.ErrorContext(ctx, "HTTP request failed", "status", resp.Status)
 		return nil, fmt.Errorf("HTTP request failed with status: %s", resp.Status)
 	}
 
@@ -139,7 +143,7 @@ func (c *A2AClient) sendRequest(ctx context.Context, method string, params any, 
 	buf := bytes.NewBuffer(respBody)
 	_, err = buf.ReadFrom(resp.Body)
 	if err != nil {
-		c.Logger.ErrorContext(ctx, "failed to read response body", "error", err)
+		c.logger.ErrorContext(ctx, "failed to read response body", "error", err)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
@@ -147,15 +151,15 @@ func (c *A2AClient) sendRequest(ctx context.Context, method string, params any, 
 }
 
 // SendTask sends a task to an A2A server.
-func (c *A2AClient) SendTask(ctx context.Context, req Request) (*SendTaskResponse, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.SendTask")
+func (c *Client) SendTask(ctx context.Context, req a2a.Request) (*a2a.SendTaskResponse, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.SendTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	sendReq, ok := req.(SendTaskRequest)
+	sendReq, ok := req.(a2a.SendTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected SendTaskRequest but got %T", req)
 	}
@@ -170,7 +174,7 @@ func (c *A2AClient) SendTask(ctx context.Context, req Request) (*SendTaskRespons
 
 	var jsonRPCResp struct {
 		JsonRPC string          `json:"jsonrpc"`
-		Result  Task            `json:"result"`
+		Result  a2a.Task        `json:"result"`
 		Error   json.RawMessage `json:"error"`
 	}
 
@@ -189,22 +193,22 @@ func (c *A2AClient) SendTask(ctx context.Context, req Request) (*SendTaskRespons
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &SendTaskResponse{
+	return &a2a.SendTaskResponse{
 		Task:      jsonRPCResp.Result,
 		RequestID: reqID,
 	}, nil
 }
 
 // GetTask retrieves a task from an A2A server.
-func (c *A2AClient) GetTask(ctx context.Context, req Request) (*GetTaskResponse, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.GetTask")
+func (c *Client) GetTask(ctx context.Context, req a2a.Request) (*a2a.GetTaskResponse, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.GetTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	getReq, ok := req.(GetTaskRequest)
+	getReq, ok := req.(a2a.GetTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected GetTaskRequest but got %T", req)
 	}
@@ -222,7 +226,7 @@ func (c *A2AClient) GetTask(ctx context.Context, req Request) (*GetTaskResponse,
 
 	var jsonRPCResp struct {
 		JsonRPC string          `json:"jsonrpc"`
-		Result  Task            `json:"result"`
+		Result  a2a.Task        `json:"result"`
 		Error   json.RawMessage `json:"error"`
 	}
 
@@ -241,22 +245,22 @@ func (c *A2AClient) GetTask(ctx context.Context, req Request) (*GetTaskResponse,
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &GetTaskResponse{
+	return &a2a.GetTaskResponse{
 		Task:      jsonRPCResp.Result,
 		RequestID: getReq.RequestID,
 	}, nil
 }
 
 // CancelTask cancels a task on an A2A server.
-func (c *A2AClient) CancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.CancelTask")
+func (c *Client) CancelTask(ctx context.Context, req a2a.Request) (*a2a.CancelTaskResponse, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.CancelTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	cancelReq, ok := req.(CancelTaskRequest)
+	cancelReq, ok := req.(a2a.CancelTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected CancelTaskRequest but got %T", req)
 	}
@@ -274,7 +278,7 @@ func (c *A2AClient) CancelTask(ctx context.Context, req Request) (*CancelTaskRes
 
 	var jsonRPCResp struct {
 		JsonRPC string          `json:"jsonrpc"`
-		Result  Task            `json:"result"`
+		Result  a2a.Task        `json:"result"`
 		Error   json.RawMessage `json:"error"`
 	}
 
@@ -293,29 +297,29 @@ func (c *A2AClient) CancelTask(ctx context.Context, req Request) (*CancelTaskRes
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &CancelTaskResponse{
+	return &a2a.CancelTaskResponse{
 		Task:      jsonRPCResp.Result,
 		RequestID: cancelReq.RequestID,
 	}, nil
 }
 
 // SetTaskPushNotification configures push notification for a task.
-func (c *A2AClient) SetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.SetTaskPushNotification")
+func (c *Client) SetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.SetTaskPushNotificationResponse, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.SetTaskPushNotification")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	pushReq, ok := req.(SetTaskPushNotificationRequest)
+	pushReq, ok := req.(a2a.SetTaskPushNotificationRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected SetTaskPushNotificationRequest but got %T", req)
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", pushReq.TaskID))
 
-	params := SetTaskPushNotificationRequest{
+	params := a2a.SetTaskPushNotificationRequest{
 		TaskID:                 pushReq.TaskID,
 		PushNotificationConfig: pushReq.PushNotificationConfig,
 	}
@@ -326,9 +330,9 @@ func (c *A2AClient) SetTaskPushNotification(ctx context.Context, req Request) (*
 	}
 
 	var jsonRPCResp struct {
-		JsonRPC string                     `json:"jsonrpc"`
-		Result  TaskPushNotificationConfig `json:"result"`
-		Error   json.RawMessage            `json:"error"`
+		JsonRPC string                         `json:"jsonrpc"`
+		Result  a2a.TaskPushNotificationConfig `json:"result"`
+		Error   json.RawMessage                `json:"error"`
 	}
 
 	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
@@ -346,22 +350,22 @@ func (c *A2AClient) SetTaskPushNotification(ctx context.Context, req Request) (*
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &SetTaskPushNotificationResponse{
+	return &a2a.SetTaskPushNotificationResponse{
 		Config:    jsonRPCResp.Result,
 		RequestID: "",
 	}, nil
 }
 
 // GetTaskPushNotification retrieves push notification configuration for a task.
-func (c *A2AClient) GetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.GetTaskPushNotification")
+func (c *Client) GetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.GetTaskPushNotificationResponse, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.GetTaskPushNotification")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	getPushReq, ok := req.(GetTaskPushNotificationRequest)
+	getPushReq, ok := req.(a2a.GetTaskPushNotificationRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected GetTaskPushNotificationRequest but got %T", req)
 	}
@@ -379,9 +383,9 @@ func (c *A2AClient) GetTaskPushNotification(ctx context.Context, req Request) (*
 	}
 
 	var jsonRPCResp struct {
-		JsonRPC string                     `json:"jsonrpc"`
-		Result  TaskPushNotificationConfig `json:"result"`
-		Error   json.RawMessage            `json:"error"`
+		JsonRPC string                         `json:"jsonrpc"`
+		Result  a2a.TaskPushNotificationConfig `json:"result"`
+		Error   json.RawMessage                `json:"error"`
 	}
 
 	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
@@ -399,22 +403,22 @@ func (c *A2AClient) GetTaskPushNotification(ctx context.Context, req Request) (*
 		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &GetTaskPushNotificationResponse{
+	return &a2a.GetTaskPushNotificationResponse{
 		Config:    jsonRPCResp.Result,
 		RequestID: getPushReq.RequestID,
 	}, nil
 }
 
 // ResubscribeTask resubscribes to a task's updates.
-func (c *A2AClient) ResubscribeTask(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error) {
-	ctx, span := c.Tracer.Start(ctx, "a2a.client.ResubscribeTask")
+func (c *Client) ResubscribeTask(ctx context.Context, req a2a.Request) (*a2a.TaskStatusUpdateEvent, error) {
+	ctx, span := c.tracer.Start(ctx, "a2a.client.ResubscribeTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	resubReq, ok := req.(TaskResubscriptionRequest)
+	resubReq, ok := req.(a2a.TaskResubscriptionRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected TaskResubscriptionRequest but got %T", req)
 	}
@@ -433,9 +437,9 @@ func (c *A2AClient) ResubscribeTask(ctx context.Context, req Request) (*TaskStat
 	}
 
 	var jsonRPCResp struct {
-		JsonRPC string                `json:"jsonrpc"`
-		Result  TaskStatusUpdateEvent `json:"result"`
-		Error   json.RawMessage       `json:"error"`
+		JsonRPC string                    `json:"jsonrpc"`
+		Result  a2a.TaskStatusUpdateEvent `json:"result"`
+		Error   json.RawMessage           `json:"error"`
 	}
 
 	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {

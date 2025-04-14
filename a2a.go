@@ -281,6 +281,11 @@ type TaskStatusUpdateEvent struct {
 	RequestID string `json:"requestId"`
 }
 
+// GetTaskID returns the task ID for a TaskStatusUpdateEvent.
+func (e TaskStatusUpdateEvent) GetTaskID() string {
+	return e.Task.ID
+}
+
 // Client represents an A2A client.
 type Client interface {
 	SendTask(ctx context.Context, req Request) (*SendTaskResponse, error)

@@ -1,102 +1,108 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package a2a
+package server
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/go-a2a/a2a"
 )
 
-// A2AServer is a server for the A2A protocol.
-type A2AServer struct {
-	// Host is the host to bind to.
-	Host string
+// Server is a server for the A2A protocol.
+type Server struct {
+	// host is the host to bind to.
+	host string
 
-	// Port is the port to listen on.
-	Port int
+	// port is the port to listen on.
+	port int
 
-	// Endpoint is the endpoint to expose the API on.
-	Endpoint string
+	// endpoint is the endpoint to expose the API on.
+	endpoint string
 
-	// TaskManager is the task manager to use.
-	TaskManager TaskManager
+	// taskManager is the task manager to use.
+	taskManager TaskManager
 
-	// AgentCard is the agent card for the server.
-	AgentCard AgentCard
+	// agentCard is the agent card for the server.
+	agentCard a2a.AgentCard
 
-	// Logger is the logger to use.
-	Logger *slog.Logger
+	// logger is the logger to use.
+	logger *slog.Logger
 
-	// Tracer is the tracer to use.
-	Tracer trace.Tracer
+	// tracer is the tracer to use.
+	tracer trace.Tracer
 
-	// Server is the HTTP server.
-	Server *http.Server
+	// server is the HTTP server.
+	server *http.Server
 }
 
-// NewA2AServer creates a new A2AServer.
-func NewA2AServer(host string, port int, endpoint string, agentCard AgentCard, taskManager TaskManager) *A2AServer {
-	return &A2AServer{
-		Host:        host,
-		Port:        port,
-		Endpoint:    endpoint,
-		TaskManager: taskManager,
-		AgentCard:   agentCard,
-		Logger:      slog.Default(),
-		Tracer:      otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
+var _ a2a.Server = (*Server)(nil)
+
+// NewServer creates a new [Server].
+func NewServer(host string, port int, endpoint string, agentCard a2a.AgentCard, taskManager TaskManager) *Server {
+	return &Server{
+		host:        host,
+		port:        port,
+		endpoint:    endpoint,
+		taskManager: taskManager,
+		agentCard:   agentCard,
+		logger:      slog.Default(),
+		tracer:      otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
 	}
 }
 
 // WithLogger sets the logger for the A2AServer.
-func (s *A2AServer) WithLogger(logger *slog.Logger) *A2AServer {
-	s.Logger = logger
+func (s *Server) WithLogger(logger *slog.Logger) *Server {
+	s.logger = logger
 	return s
 }
 
 // WithTracer sets the tracer for the A2AServer.
-func (s *A2AServer) WithTracer(tracer trace.Tracer) *A2AServer {
-	s.Tracer = tracer
+func (s *Server) WithTracer(tracer trace.Tracer) *Server {
+	s.tracer = tracer
 	return s
 }
 
 // Start starts the A2AServer.
-func (s *A2AServer) Start(ctx context.Context) error {
-	if s.AgentCard.Name == "" || s.AgentCard.URL == "" || s.AgentCard.Version == "" {
+func (s *Server) Start(ctx context.Context) error {
+	if s.agentCard.Name == "" || s.agentCard.URL == "" || s.agentCard.Version == "" {
 		return fmt.Errorf("agent card must have name, URL, and version")
 	}
 
-	if s.TaskManager == nil {
+	if s.taskManager == nil {
 		return fmt.Errorf("task manager cannot be nil")
 	}
 
 	mux := http.NewServeMux()
 
 	// Main A2A endpoint
-	mux.HandleFunc(s.Endpoint, s.processRequest)
+	mux.HandleFunc(s.endpoint, s.processRequest)
 
 	// Agent card endpoint - serves the agent's metadata
 	mux.HandleFunc("/", s.handleAgentCardRequest)
 
-	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
-	s.Server = &http.Server{
+	addr := net.JoinHostPort(s.host, strconv.Itoa(s.port))
+	s.server = &http.Server{
 		Addr:    addr,
 		Handler: mux,
 	}
 
-	s.Logger.InfoContext(ctx, "starting A2A server", "address", addr, "endpoint", s.Endpoint)
+	s.logger.InfoContext(ctx, "starting A2A server", "address", addr, "endpoint", s.endpoint)
 
 	go func() {
-		if err := s.Server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.Logger.ErrorContext(ctx, "server error", "error", err)
+		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.logger.ErrorContext(ctx, "server error", "error", err)
 		}
 	}()
 
@@ -104,16 +110,16 @@ func (s *A2AServer) Start(ctx context.Context) error {
 }
 
 // Stop stops the A2AServer.
-func (s *A2AServer) Stop(ctx context.Context) error {
-	if s.Server == nil {
+func (s *Server) Stop(ctx context.Context) error {
+	if s.server == nil {
 		return nil
 	}
 
-	return s.Server.Shutdown(ctx)
+	return s.server.Shutdown(ctx)
 }
 
 // handleAgentCardRequest handles requests for the agent card.
-func (s *A2AServer) handleAgentCardRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAgentCardRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -122,22 +128,22 @@ func (s *A2AServer) handleAgentCardRequest(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	data, err := sonic.ConfigFastest.Marshal(s.AgentCard)
+	data, err := sonic.ConfigFastest.Marshal(s.agentCard)
 	if err != nil {
-		s.Logger.Error("failed to marshal agent card", "error", err)
+		s.logger.Error("failed to marshal agent card", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	_, err = w.Write(data)
 	if err != nil {
-		s.Logger.Error("failed to write response", "error", err)
+		s.logger.Error("failed to write response", "error", err)
 	}
 }
 
 // processRequest is the main handler for the A2A API.
-func (s *A2AServer) processRequest(w http.ResponseWriter, r *http.Request) {
-	ctx, span := s.Tracer.Start(r.Context(), "a2a.server.processRequest")
+func (s *Server) processRequest(w http.ResponseWriter, r *http.Request) {
+	ctx, span := s.tracer.Start(r.Context(), "a2a.server.processRequest")
 	defer span.End()
 
 	if r.Method != http.MethodPost {
@@ -192,7 +198,7 @@ func (s *A2AServer) processRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		s.Logger.ErrorContext(ctx, "method execution failed", "method", req.Method, "error", err)
+		s.logger.ErrorContext(ctx, "method execution failed", "method", req.Method, "error", err)
 		s.writeError(w, -32603, fmt.Sprintf("Internal error: %v", err))
 		return
 	}
@@ -210,7 +216,7 @@ func (s *A2AServer) processRequest(w http.ResponseWriter, r *http.Request) {
 
 	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
-		s.Logger.ErrorContext(ctx, "failed to marshal response", "error", err)
+		s.logger.ErrorContext(ctx, "failed to marshal response", "error", err)
 		s.writeError(w, -32603, "Internal error serializing response")
 		return
 	}
@@ -219,12 +225,12 @@ func (s *A2AServer) processRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(data)
 	if err != nil {
-		s.Logger.ErrorContext(ctx, "failed to write response", "error", err)
+		s.logger.ErrorContext(ctx, "failed to write response", "error", err)
 	}
 }
 
 // writeError writes an error response in JSON-RPC format.
-func (s *A2AServer) writeError(w http.ResponseWriter, code int, message string) {
+func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
 	resp := struct {
 		JsonRPC string `json:"jsonrpc"`
 		ID      string `json:"id,omitempty"`
@@ -245,7 +251,7 @@ func (s *A2AServer) writeError(w http.ResponseWriter, code int, message string) 
 
 	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
-		s.Logger.Error("failed to marshal error response", "error", err)
+		s.logger.Error("failed to marshal error response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -254,23 +260,23 @@ func (s *A2AServer) writeError(w http.ResponseWriter, code int, message string) 
 	w.WriteHeader(http.StatusOK) // Error is in the JSON-RPC response, not HTTP
 	_, err = w.Write(data)
 	if err != nil {
-		s.Logger.Error("failed to write error response", "error", err)
+		s.logger.Error("failed to write error response", "error", err)
 	}
 }
 
 // handleSendTask handles the tasks/send method.
-func (s *A2AServer) handleSendTask(ctx context.Context, params json.RawMessage) (*Task, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleSendTask")
+func (s *Server) handleSendTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSendTask")
 	defer span.End()
 
-	var taskParams Task
+	var taskParams a2a.Task
 	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
 
-	task, err := s.TaskManager.OnSendTask(ctx, &taskParams)
+	task, err := s.taskManager.OnSendTask(ctx, &taskParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process task: %w", err)
 	}
@@ -279,8 +285,8 @@ func (s *A2AServer) handleSendTask(ctx context.Context, params json.RawMessage) 
 }
 
 // handleGetTask handles the tasks/get method.
-func (s *A2AServer) handleGetTask(ctx context.Context, params json.RawMessage) (*Task, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleGetTask")
+func (s *Server) handleGetTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleGetTask")
 	defer span.End()
 
 	var taskParams struct {
@@ -292,7 +298,7 @@ func (s *A2AServer) handleGetTask(ctx context.Context, params json.RawMessage) (
 
 	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
 
-	task, err := s.TaskManager.OnGetTask(ctx, taskParams.ID)
+	task, err := s.taskManager.OnGetTask(ctx, taskParams.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
@@ -301,8 +307,8 @@ func (s *A2AServer) handleGetTask(ctx context.Context, params json.RawMessage) (
 }
 
 // handleCancelTask handles the tasks/cancel method.
-func (s *A2AServer) handleCancelTask(ctx context.Context, params json.RawMessage) (*Task, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleCancelTask")
+func (s *Server) handleCancelTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleCancelTask")
 	defer span.End()
 
 	var taskParams struct {
@@ -314,7 +320,7 @@ func (s *A2AServer) handleCancelTask(ctx context.Context, params json.RawMessage
 
 	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
 
-	task, err := s.TaskManager.OnCancelTask(ctx, taskParams.ID)
+	task, err := s.taskManager.OnCancelTask(ctx, taskParams.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)
 	}
@@ -323,18 +329,18 @@ func (s *A2AServer) handleCancelTask(ctx context.Context, params json.RawMessage
 }
 
 // handleSetTaskPushNotification handles the tasks/pushNotification/set method.
-func (s *A2AServer) handleSetTaskPushNotification(ctx context.Context, params json.RawMessage) (*TaskPushNotificationConfig, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleSetTaskPushNotification")
+func (s *Server) handleSetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSetTaskPushNotification")
 	defer span.End()
 
-	var config TaskPushNotificationConfig
+	var config a2a.TaskPushNotificationConfig
 	if err := sonic.ConfigFastest.Unmarshal(params, &config); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", config.TaskID))
 
-	result, err := s.TaskManager.OnSetTaskPushNotification(ctx, &config)
+	result, err := s.taskManager.OnSetTaskPushNotification(ctx, &config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set push notification: %w", err)
 	}
@@ -343,8 +349,8 @@ func (s *A2AServer) handleSetTaskPushNotification(ctx context.Context, params js
 }
 
 // handleGetTaskPushNotification handles the tasks/pushNotification/get method.
-func (s *A2AServer) handleGetTaskPushNotification(ctx context.Context, params json.RawMessage) (*TaskPushNotificationConfig, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleGetTaskPushNotification")
+func (s *Server) handleGetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleGetTaskPushNotification")
 	defer span.End()
 
 	var taskParams struct {
@@ -356,7 +362,7 @@ func (s *A2AServer) handleGetTaskPushNotification(ctx context.Context, params js
 
 	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
 
-	config, err := s.TaskManager.OnGetTaskPushNotification(ctx, taskParams.ID)
+	config, err := s.taskManager.OnGetTaskPushNotification(ctx, taskParams.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get push notification: %w", err)
 	}
@@ -365,8 +371,8 @@ func (s *A2AServer) handleGetTaskPushNotification(ctx context.Context, params js
 }
 
 // handleTaskResubscription handles the tasks/resubscribe method.
-func (s *A2AServer) handleTaskResubscription(ctx context.Context, params json.RawMessage) (*TaskStatusUpdateEvent, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleTaskResubscription")
+func (s *Server) handleTaskResubscription(ctx context.Context, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleTaskResubscription")
 	defer span.End()
 
 	var taskParams struct {
@@ -379,7 +385,7 @@ func (s *A2AServer) handleTaskResubscription(ctx context.Context, params json.Ra
 
 	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
 
-	event, err := s.TaskManager.OnResubscribeToTask(ctx, taskParams.ID, taskParams.HistoryLength)
+	event, err := s.taskManager.OnResubscribeToTask(ctx, taskParams.ID, taskParams.HistoryLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resubscribe to task: %w", err)
 	}
@@ -388,11 +394,11 @@ func (s *A2AServer) handleTaskResubscription(ctx context.Context, params json.Ra
 }
 
 // handleSendTaskStreaming handles the tasks/sendSubscribe method.
-func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (*TaskStatusUpdateEvent, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.handleSendTaskStreaming")
+func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSendTaskStreaming")
 	defer span.End()
 
-	var taskParams Task
+	var taskParams a2a.Task
 	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
@@ -406,7 +412,7 @@ func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.Response
 	w.WriteHeader(http.StatusOK)
 
 	// Create a channel for the task events
-	eventCh, err := s.TaskManager.OnSendTaskSubscribe(ctx, taskParams)
+	eventCh, err := s.taskManager.OnSendTaskSubscribe(ctx, taskParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
 	}
@@ -432,14 +438,14 @@ func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.Response
 
 		data, err := sonic.ConfigFastest.Marshal(resp)
 		if err != nil {
-			s.Logger.ErrorContext(ctx, "failed to marshal event", "error", err)
+			s.logger.ErrorContext(ctx, "failed to marshal event", "error", err)
 			continue
 		}
 
 		// Write event to the client
 		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
 		if err != nil {
-			s.Logger.ErrorContext(ctx, "failed to write event", "error", err)
+			s.logger.ErrorContext(ctx, "failed to write event", "error", err)
 			break
 		}
 
@@ -450,146 +456,146 @@ func (s *A2AServer) handleSendTaskStreaming(ctx context.Context, w http.Response
 }
 
 // HandleSendTask processes a send task request.
-func (s *A2AServer) HandleSendTask(ctx context.Context, req Request) (*SendTaskResponse, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleSendTask")
+func (s *Server) HandleSendTask(ctx context.Context, req a2a.Request) (*a2a.SendTaskResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleSendTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	sendReq, ok := req.(SendTaskRequest)
+	sendReq, ok := req.(a2a.SendTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected SendTaskRequest but got %T", req)
 	}
 
-	task, err := s.TaskManager.OnSendTask(ctx, &sendReq.Task)
+	task, err := s.taskManager.OnSendTask(ctx, &sendReq.Task)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process task: %w", err)
 	}
 
-	return &SendTaskResponse{
+	return &a2a.SendTaskResponse{
 		Task:      *task,
 		RequestID: task.ID,
 	}, nil
 }
 
 // HandleGetTask processes a get task request.
-func (s *A2AServer) HandleGetTask(ctx context.Context, req Request) (*GetTaskResponse, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleGetTask")
+func (s *Server) HandleGetTask(ctx context.Context, req a2a.Request) (*a2a.GetTaskResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleGetTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	getReq, ok := req.(GetTaskRequest)
+	getReq, ok := req.(a2a.GetTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected GetTaskRequest but got %T", req)
 	}
 
-	task, err := s.TaskManager.OnGetTask(ctx, getReq.TaskID)
+	task, err := s.taskManager.OnGetTask(ctx, getReq.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	return &GetTaskResponse{
+	return &a2a.GetTaskResponse{
 		Task:      *task,
 		RequestID: getReq.RequestID,
 	}, nil
 }
 
 // HandleCancelTask processes a cancel task request.
-func (s *A2AServer) HandleCancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleCancelTask")
+func (s *Server) HandleCancelTask(ctx context.Context, req a2a.Request) (*a2a.CancelTaskResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleCancelTask")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	cancelReq, ok := req.(CancelTaskRequest)
+	cancelReq, ok := req.(a2a.CancelTaskRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected CancelTaskRequest but got %T", req)
 	}
 
-	task, err := s.TaskManager.OnCancelTask(ctx, cancelReq.TaskID)
+	task, err := s.taskManager.OnCancelTask(ctx, cancelReq.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)
 	}
 
-	return &CancelTaskResponse{
+	return &a2a.CancelTaskResponse{
 		Task:      *task,
 		RequestID: cancelReq.RequestID,
 	}, nil
 }
 
 // HandleSetTaskPushNotification processes a set task push notification request.
-func (s *A2AServer) HandleSetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleSetTaskPushNotification")
+func (s *Server) HandleSetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.SetTaskPushNotificationResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleSetTaskPushNotification")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	pushReq, ok := req.(*SetTaskPushNotificationRequest)
+	pushReq, ok := req.(*a2a.SetTaskPushNotificationRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected SetTaskPushNotificationRequest but got %T", req)
 	}
 
-	config := (*TaskPushNotificationConfig)(pushReq)
-	result, err := s.TaskManager.OnSetTaskPushNotification(ctx, config)
+	config := (*a2a.TaskPushNotificationConfig)(pushReq)
+	result, err := s.taskManager.OnSetTaskPushNotification(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set push notification: %w", err)
 	}
 
-	return &SetTaskPushNotificationResponse{
+	return &a2a.SetTaskPushNotificationResponse{
 		Config:    *result,
 		RequestID: "",
 	}, nil
 }
 
 // HandleGetTaskPushNotification processes a get task push notification request.
-func (s *A2AServer) HandleGetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleGetTaskPushNotification")
+func (s *Server) HandleGetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.GetTaskPushNotificationResponse, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleGetTaskPushNotification")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	getPushReq, ok := req.(GetTaskPushNotificationRequest)
+	getPushReq, ok := req.(a2a.GetTaskPushNotificationRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected GetTaskPushNotificationRequest but got %T", req)
 	}
 
-	config, err := s.TaskManager.OnGetTaskPushNotification(ctx, getPushReq.TaskID)
+	config, err := s.taskManager.OnGetTaskPushNotification(ctx, getPushReq.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get push notification: %w", err)
 	}
 
-	return &GetTaskPushNotificationResponse{
+	return &a2a.GetTaskPushNotificationResponse{
 		Config:    *config,
 		RequestID: getPushReq.RequestID,
 	}, nil
 }
 
 // HandleTaskResubscription processes a task resubscription request.
-func (s *A2AServer) HandleTaskResubscription(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error) {
-	ctx, span := s.Tracer.Start(ctx, "a2a.server.HandleTaskResubscription")
+func (s *Server) HandleTaskResubscription(ctx context.Context, req a2a.Request) (*a2a.TaskStatusUpdateEvent, error) {
+	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleTaskResubscription")
 	defer span.End()
 
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
-	resubReq, ok := req.(TaskResubscriptionRequest)
+	resubReq, ok := req.(a2a.TaskResubscriptionRequest)
 	if !ok {
 		return nil, fmt.Errorf("expected TaskResubscriptionRequest but got %T", req)
 	}
 
-	event, err := s.TaskManager.OnResubscribeToTask(ctx, resubReq.TaskID, resubReq.HistoryLength)
+	event, err := s.taskManager.OnResubscribeToTask(ctx, resubReq.TaskID, resubReq.HistoryLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resubscribe to task: %w", err)
 	}

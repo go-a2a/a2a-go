@@ -1,7 +1,7 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package a2a
+package server
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/go-a2a/a2a"
 )
 
 // TaskEvent represents an event related to a task.
@@ -26,37 +28,37 @@ type TaskEvent interface {
 // TaskManager is the interface that task managers must implement.
 type TaskManager interface {
 	// OnSendTask handles a new task.
-	OnSendTask(ctx context.Context, task *Task) (*Task, error)
+	OnSendTask(ctx context.Context, task *a2a.Task) (*a2a.Task, error)
 
 	// OnGetTask retrieves a task.
-	OnGetTask(ctx context.Context, taskID string) (*Task, error)
+	OnGetTask(ctx context.Context, taskID string) (*a2a.Task, error)
 
 	// OnCancelTask cancels a task.
-	OnCancelTask(ctx context.Context, taskID string) (*Task, error)
+	OnCancelTask(ctx context.Context, taskID string) (*a2a.Task, error)
 
 	// OnSetTaskPushNotification configures push notification for a task.
-	OnSetTaskPushNotification(ctx context.Context, config *TaskPushNotificationConfig) (*TaskPushNotificationConfig, error)
+	OnSetTaskPushNotification(ctx context.Context, config *a2a.TaskPushNotificationConfig) (*a2a.TaskPushNotificationConfig, error)
 
 	// OnGetTaskPushNotification retrieves push notification configuration for a task.
-	OnGetTaskPushNotification(ctx context.Context, taskID string) (*TaskPushNotificationConfig, error)
+	OnGetTaskPushNotification(ctx context.Context, taskID string) (*a2a.TaskPushNotificationConfig, error)
 
 	// OnResubscribeToTask resubscribes to a task's updates.
-	OnResubscribeToTask(ctx context.Context, taskID string, historyLength int) (*TaskStatusUpdateEvent, error)
+	OnResubscribeToTask(ctx context.Context, taskID string, historyLength int) (*a2a.TaskStatusUpdateEvent, error)
 
 	// OnSendTaskSubscribe starts a streaming task and returns a channel for updates.
-	OnSendTaskSubscribe(ctx context.Context, task Task) (<-chan TaskEvent, error)
+	OnSendTaskSubscribe(ctx context.Context, task a2a.Task) (<-chan TaskEvent, error)
 }
 
 // InMemoryTaskManager is an in-memory implementation of TaskManager.
 type InMemoryTaskManager struct {
 	// Tasks is a map of task ID to task.
-	tasks map[string]*Task
+	tasks map[string]*a2a.Task
 
 	// TaskMutex protects the tasks map.
 	taskMutex sync.RWMutex
 
 	// PushNotifications is a map of task ID to push notification config.
-	pushNotifications map[string]TaskPushNotificationConfig
+	pushNotifications map[string]a2a.TaskPushNotificationConfig
 
 	// PushMutex protects the pushNotifications map.
 	pushMutex sync.RWMutex
@@ -77,8 +79,8 @@ type InMemoryTaskManager struct {
 // NewInMemoryTaskManager creates a new InMemoryTaskManager.
 func NewInMemoryTaskManager() *InMemoryTaskManager {
 	return &InMemoryTaskManager{
-		tasks:             make(map[string]*Task),
-		pushNotifications: make(map[string]TaskPushNotificationConfig),
+		tasks:             make(map[string]*a2a.Task),
+		pushNotifications: make(map[string]a2a.TaskPushNotificationConfig),
 		subscribers:       make(map[string][]chan TaskEvent),
 		Logger:            slog.Default(),
 		Tracer:            otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a/task_manager"),
@@ -97,13 +99,8 @@ func (tm *InMemoryTaskManager) WithTracer(tracer trace.Tracer) *InMemoryTaskMana
 	return tm
 }
 
-// GetTaskID returns the task ID for a TaskStatusUpdateEvent.
-func (e TaskStatusUpdateEvent) GetTaskID() string {
-	return e.Task.ID
-}
-
 // OnSendTask handles a new task.
-func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, task Task) (*Task, error) {
+func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, task a2a.Task) (*a2a.Task, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnSendTask",
 		trace.WithAttributes(attribute.String("a2a.task_id", task.ID)))
 	defer span.End()
@@ -121,7 +118,7 @@ func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, task Task) (*Task
 
 	// Set initial state if not set
 	if task.State == "" {
-		task.State = TaskStateSubmitted
+		task.State = a2a.TaskStateSubmitted
 	}
 
 	// Store task
@@ -130,7 +127,7 @@ func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, task Task) (*Task
 	tm.taskMutex.Unlock()
 
 	// Create status update event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      task,
 		RequestID: task.ID,
 	}
@@ -143,7 +140,7 @@ func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, task Task) (*Task
 }
 
 // OnGetTask retrieves a task.
-func (tm *InMemoryTaskManager) OnGetTask(ctx context.Context, taskID string) (*Task, error) {
+func (tm *InMemoryTaskManager) OnGetTask(ctx context.Context, taskID string) (*a2a.Task, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnGetTask",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -166,7 +163,7 @@ func (tm *InMemoryTaskManager) OnGetTask(ctx context.Context, taskID string) (*T
 }
 
 // OnCancelTask cancels a task.
-func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, taskID string) (*Task, error) {
+func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, taskID string) (*a2a.Task, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnCancelTask",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -184,19 +181,19 @@ func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, taskID string) 
 	}
 
 	// Only allow cancellation of tasks that are not already in terminal states
-	if task.State == TaskStateCompleted || task.State == TaskStateCanceled || task.State == TaskStateFailed {
+	if task.State == a2a.TaskStateCompleted || task.State == a2a.TaskStateCanceled || task.State == a2a.TaskStateFailed {
 		tm.taskMutex.Unlock()
 		tm.Logger.InfoContext(ctx, "task cannot be canceled", "task_id", taskID, "state", task.State)
 		return nil, fmt.Errorf("task cannot be canceled: already in state %s", task.State)
 	}
 
 	// Update task state
-	task.State = TaskStateCanceled
+	task.State = a2a.TaskStateCanceled
 	task.ModifiedAt = time.Now().UTC()
 	tm.taskMutex.Unlock()
 
 	// Create status update event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      *task,
 		RequestID: taskID,
 	}
@@ -209,7 +206,7 @@ func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, taskID string) 
 }
 
 // OnSetTaskPushNotification configures push notification for a task.
-func (tm *InMemoryTaskManager) OnSetTaskPushNotification(ctx context.Context, config TaskPushNotificationConfig) (*TaskPushNotificationConfig, error) {
+func (tm *InMemoryTaskManager) OnSetTaskPushNotification(ctx context.Context, config a2a.TaskPushNotificationConfig) (*a2a.TaskPushNotificationConfig, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnSetTaskPushNotification",
 		trace.WithAttributes(attribute.String("a2a.task_id", config.TaskID)))
 	defer span.End()
@@ -242,7 +239,7 @@ func (tm *InMemoryTaskManager) OnSetTaskPushNotification(ctx context.Context, co
 }
 
 // OnGetTaskPushNotification retrieves push notification configuration for a task.
-func (tm *InMemoryTaskManager) OnGetTaskPushNotification(ctx context.Context, taskID string) (*TaskPushNotificationConfig, error) {
+func (tm *InMemoryTaskManager) OnGetTaskPushNotification(ctx context.Context, taskID string) (*a2a.TaskPushNotificationConfig, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnGetTaskPushNotification",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -276,7 +273,7 @@ func (tm *InMemoryTaskManager) OnGetTaskPushNotification(ctx context.Context, ta
 }
 
 // OnResubscribeToTask resubscribes to a task's updates.
-func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, taskID string, historyLength int) (*TaskStatusUpdateEvent, error) {
+func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, taskID string, historyLength int) (*a2a.TaskStatusUpdateEvent, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnResubscribeToTask",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -296,7 +293,7 @@ func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, taskID s
 	}
 
 	// Create event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      *task,
 		RequestID: taskID,
 	}
@@ -306,7 +303,7 @@ func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, taskID s
 }
 
 // OnSendTaskSubscribe starts a streaming task and returns a channel for updates.
-func (tm *InMemoryTaskManager) OnSendTaskSubscribe(ctx context.Context, task Task) (<-chan TaskEvent, error) {
+func (tm *InMemoryTaskManager) OnSendTaskSubscribe(ctx context.Context, task a2a.Task) (<-chan TaskEvent, error) {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.OnSendTaskSubscribe",
 		trace.WithAttributes(attribute.String("a2a.task_id", task.ID)))
 	defer span.End()
@@ -333,7 +330,7 @@ func (tm *InMemoryTaskManager) OnSendTaskSubscribe(ctx context.Context, task Tas
 	tm.subMutex.Unlock()
 
 	// Send initial event
-	initialEvent := TaskStatusUpdateEvent{
+	initialEvent := a2a.TaskStatusUpdateEvent{
 		Task:      *processedTask,
 		RequestID: task.ID,
 	}
@@ -376,7 +373,7 @@ func (tm *InMemoryTaskManager) notifySubscribers(ctx context.Context, taskID str
 }
 
 // UpdateTaskStatus updates a task's status and notifies subscribers.
-func (tm *InMemoryTaskManager) UpdateTaskStatus(ctx context.Context, taskID string, state TaskState) error {
+func (tm *InMemoryTaskManager) UpdateTaskStatus(ctx context.Context, taskID string, state a2a.TaskState) error {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.UpdateTaskStatus",
 		trace.WithAttributes(
 			attribute.String("a2a.task_id", taskID),
@@ -402,7 +399,7 @@ func (tm *InMemoryTaskManager) UpdateTaskStatus(ctx context.Context, taskID stri
 	tm.taskMutex.Unlock()
 
 	// Create event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      *task,
 		RequestID: taskID,
 	}
@@ -415,7 +412,7 @@ func (tm *InMemoryTaskManager) UpdateTaskStatus(ctx context.Context, taskID stri
 }
 
 // AddTaskMessage adds a message to a task and notifies subscribers.
-func (tm *InMemoryTaskManager) AddTaskMessage(ctx context.Context, taskID string, message Message) error {
+func (tm *InMemoryTaskManager) AddTaskMessage(ctx context.Context, taskID string, message a2a.Message) error {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.AddTaskMessage",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -443,7 +440,7 @@ func (tm *InMemoryTaskManager) AddTaskMessage(ctx context.Context, taskID string
 	tm.taskMutex.Unlock()
 
 	// Create event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      *task,
 		RequestID: taskID,
 	}
@@ -456,7 +453,7 @@ func (tm *InMemoryTaskManager) AddTaskMessage(ctx context.Context, taskID string
 }
 
 // AddTaskArtifact adds an artifact to a task and notifies subscribers.
-func (tm *InMemoryTaskManager) AddTaskArtifact(ctx context.Context, taskID string, artifact Artifact) error {
+func (tm *InMemoryTaskManager) AddTaskArtifact(ctx context.Context, taskID string, artifact a2a.Artifact) error {
 	ctx, span := tm.Tracer.Start(ctx, "a2a.task_manager.AddTaskArtifact",
 		trace.WithAttributes(attribute.String("a2a.task_id", taskID)))
 	defer span.End()
@@ -486,7 +483,7 @@ func (tm *InMemoryTaskManager) AddTaskArtifact(ctx context.Context, taskID strin
 	tm.taskMutex.Unlock()
 
 	// Create event
-	event := TaskStatusUpdateEvent{
+	event := a2a.TaskStatusUpdateEvent{
 		Task:      *task,
 		RequestID: taskID,
 	}
