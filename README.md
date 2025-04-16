@@ -4,9 +4,9 @@
 [![Go](https://github.com/go-a2a/a2a/actions/workflows/go.yml/badge.svg)](https://github.com/go-a2a/a2a/actions/workflows/test.yml)
 
 > [!IMPORTANT]
-> This project is alpha stage.
+> This project is in the alpha stage.
 >
-> Flags, configuration, behavior and design may change significantly.
+> Flags, configuration, behavior, and design may change significantly.
 
 A Go implementation of the [Agent-to-Agent (A2A)](https://github.com/google/A2A) protocol. 
 
