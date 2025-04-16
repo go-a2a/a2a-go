@@ -4,6 +4,11 @@
 [![Go](https://github.com/go-a2a/a2a/actions/workflows/go.yml/badge.svg)](https://github.com/go-a2a/a2a/actions/workflows/go.yml)
 [![License](https://img.shields.io/github/license/go-a2a/a2a)](LICENSE)
 
+> [!IMPORTANT]
+> This project is alpha stage.
+>
+> Flags, configuration, behavior and design may change significantly.
+
 A Go implementation of the [Agent-to-Agent (A2A)](https://github.com/google/A2A) protocol. 
 
 A2A is an open protocol enabling communication and interoperability between opaque agentic applications.
