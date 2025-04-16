@@ -1,8 +1,7 @@
 # A2A for Go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-a2a/a2a.svg)](https://pkg.go.dev/github.com/go-a2a/a2a)
-[![Go](https://github.com/go-a2a/a2a/actions/workflows/go.yml/badge.svg)](https://github.com/go-a2a/a2a/actions/workflows/go.yml)
-[![License](https://img.shields.io/github/license/go-a2a/a2a)](LICENSE)
+[![Go](https://github.com/go-a2a/a2a/actions/workflows/go.yml/badge.svg)](https://github.com/go-a2a/a2a/actions/workflows/test.yml)
 
 > [!IMPORTANT]
 > This project is alpha stage.
@@ -62,4 +61,4 @@ func main() {
 
 ## License
 
-Apache-2.0 - See [LICENSE](LICENSE) for more information.
+This project is licensed under the Apache 2.0 License - see the [LICENSE](./LICENSE) file for details.
