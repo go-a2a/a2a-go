@@ -5,8 +5,7 @@
 package a2a
 
 import (
-	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,547 +18,308 @@ func init() {
 // Version is the current version of the A2A protocol.
 const Version = "0.1.0"
 
-// Request is an interface implemented by all request types in the A2A protocol.
-type Request interface {
-	request()
-
-	// Validate validates the request and returns an error if it is invalid.
-	Validate() error
-}
-
-// TaskState represents the state of a Task.
+// TaskState represents the lifecycle state of a task.
 type TaskState string
 
+// Task state constants.
 const (
-	// TaskStateSubmitted indicates the task has been submitted.
+	// TaskStateSubmitted indicates the task has been submitted to the agent.
 	TaskStateSubmitted TaskState = "submitted"
-
-	// TaskStateWorking indicates the task is being worked on.
+	// TaskStateWorking indicates the agent is actively working on the task.
 	TaskStateWorking TaskState = "working"
-
-	// TaskStateCompleted indicates the task has been completed.
+	// TaskStateInputRequired indicates the agent needs additional input from the client.
+	TaskStateInputRequired TaskState = "input-required"
+	// TaskStateCompleted indicates the task has been successfully completed.
 	TaskStateCompleted TaskState = "completed"
-
-	// TaskStateCanceled indicates the task has been canceled.
-	TaskStateCanceled TaskState = "canceled"
-
 	// TaskStateFailed indicates the task has failed.
 	TaskStateFailed TaskState = "failed"
+	// TaskStateCanceled indicates the task has been canceled.
+	TaskStateCanceled TaskState = "canceled"
 )
 
-// AgentCard represents metadata about an agent, including its capabilities.
-type AgentCard struct {
-	Name         string       `json:"name"`
-	URL          string       `json:"url"`
-	Version      string       `json:"version"`
-	Description  string       `json:"description,omitempty"`
-	Vendor       string       `json:"vendor,omitempty"`
-	Capabilities []Capability `json:"capabilities,omitempty"`
+// PartType represents the possible types of message parts.
+type PartType string
+
+const (
+	// PartTypeText indicates the part contains text.
+	PartTypeText PartType = "text"
+	// PartTypeFile indicates the part contains file data.
+	PartTypeFile PartType = "file"
+	// PartTypeData indicates the part contains structured data.
+	PartTypeData PartType = "data"
+)
+
+// Part is the interface for all part types.
+type Part interface {
+	Type() PartType
 }
 
-// Capability represents a specific capability that an agent has.
-type Capability struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Models      []string `json:"models,omitempty"`
+// TextPart represents a text message part.
+type TextPart struct {
+	// Text is the textual content.
+	Text string `json:"text"`
+	// Metadata contains optional part-specific metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// Part represents a part of a message or artifact. It can be text, a file, or data.
-type Part struct {
-	Type        string         `json:"type"`
-	Text        string         `json:"text,omitempty"`
-	DataMIME    string         `json:"dataMime,omitempty"`
-	Data        string         `json:"data,omitempty"`
-	FileName    string         `json:"fileName,omitempty"`
-	FileContent string         `json:"fileContent,omitempty"`
-	Index       map[string]any `json:"index,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+var _ Part = (*TextPart)(nil)
+
+// Type implements [Part].
+func (TextPart) Type() PartType {
+	return PartTypeText
 }
 
-// Message represents a message in a task, which can be from a user or agent.
+// FilePart represents a file message part.
+type FilePart struct {
+	// File contains the file content details.
+	File FileContent `json:"file"`
+	// Metadata contains optional part-specific metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+var _ Part = (*FilePart)(nil)
+
+// Type implements [Part].
+func (FilePart) Type() PartType {
+	return PartTypeFile
+}
+
+// FileContent represents the content of a file, either as base64 encoded bytes or a URI.
+type FileContent struct {
+	Name     string `json:"name,omitzero"`
+	MIMEType string `json:"mimeType,omitzero"`
+	Bytes    string `json:"bytes,omitzero"`
+	URI      string `json:"uri,omitzero"`
+}
+
+// CheckContent checks the content of the file to ensure it has either Bytes or URI set, but not both.
+func (fc FileContent) CheckContent() error {
+	if fc.Bytes == "" && fc.URI == "" {
+		return errors.New("either 'Bytes' or 'URI' fields must be present in the file data")
+	}
+	if fc.Bytes != "" && fc.URI != "" {
+		return errors.New("only one of 'Bytes' or 'URI' fields can be present in the file data")
+	}
+	return nil
+}
+
+// DataPart represents a structured data message part.
+type DataPart struct {
+	// Data contains the structured JSON data.
+	Data map[string]any `json:"data"`
+	// Metadata contains optional part-specific metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+var _ Part = (*DataPart)(nil)
+
+// Type implements [Part].
+func (DataPart) Type() PartType {
+	return PartTypeFile
+}
+
+// Message represents a communication unit between user and agent.
 type Message struct {
-	Role      string    `json:"role"`
-	Parts     []Part    `json:"parts"`
-	CreatedAt time.Time `json:"createdAt"`
+	// Role is the sender role ("user" or "agent").
+	Role string `json:"role"`
+	// Parts contains the content parts (text, file, data).
+	Parts []Part `json:"parts"`
+	// Metadata contains optional message-specific metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// Artifact represents an output generated during a task.
+// TaskStatus represents the current status of a task.
+type TaskStatus struct {
+	// State is the current lifecycle state.
+	State TaskState `json:"state"`
+	// Message is optionally associated with this status.
+	Message *Message `json:"message,omitempty"`
+	// Timestamp is the ISO 8601 timestamp of the status update.
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// Artifact represents output generated by a task.
 type Artifact struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Parts      []Part         `json:"parts"`
-	Index      map[string]any `json:"index,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	ModifiedAt time.Time      `json:"modifiedAt,omitzero"`
+	// Name is an optional name for the artifact.
+	Name string `json:"name,omitzero"`
+	// Description is an optional description of the artifact.
+	Description string `json:"description,omitzero"`
+	// Parts contains the content parts of the artifact.
+	Parts []Part `json:"parts"`
+	// Index is the order index, useful for streaming/updates.
+	Index int `json:"index,omitempty"`
+	// Append indicates if content should append to an artifact at the same index (for streaming).
+	Append bool `json:"append,omitzero"`
+	// LastChunk indicates the final chunk for this artifact (for streaming).
+	LastChunk bool `json:"lastChunk,omitzero"`
+	// Metadata contains optional additional artifact metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// Task represents a unit of work in the A2A protocol.
+// Task represents a unit of work processed by an agent.
 type Task struct {
-	ID         string         `json:"id"`
-	State      TaskState      `json:"state"`
-	AgentCard  AgentCard      `json:"agentCard"`
-	Client     string         `json:"client,omitempty"`
-	Messages   []Message      `json:"messages"`
-	Artifacts  []Artifact     `json:"artifacts,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	ModifiedAt time.Time      `json:"modifiedAt,omitzero"`
+	// ID is the unique task identifier.
+	ID string `json:"id"`
+	// SessionID optionally groups related tasks.
+	SessionID string `json:"sessionId,omitzero"`
+	// Status contains the current state and associated message.
+	Status TaskStatus `json:"status"`
+	// Artifacts contains outputs generated by the task.
+	Artifacts []Artifact `json:"artifacts,omitempty"`
+	// History is the list of messages exchanged during the task.
+	History []Message `json:"history,omitempty"`
+	// Metadata contains additional task metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// SendTaskRequest represents a request to send a task to an A2A server.
-type SendTaskRequest struct {
-	Task Task `json:"task"`
+// TaskStatusUpdateEvent signals a change in task status.
+type TaskStatusUpdateEvent struct {
+	// ID is the task identifier.
+	ID string `json:"id"`
+	// Status is the new status object.
+	Status TaskStatus `json:"status"`
+	// Final indicates if this is the terminal update for the task.
+	Final bool `json:"final,omitempty"`
+	// Metadata contains optional event metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-var _ Request = (*SendTaskRequest)(nil)
-
-func (SendTaskRequest) request() {}
-
-// Validate validates the SendTaskRequest.
-func (r SendTaskRequest) Validate() error {
-	if r.Task.ID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	if len(r.Task.Messages) == 0 {
-		return fmt.Errorf("task must have at least one message")
-	}
-	return nil
+// TaskArtifactUpdateEvent signals a new or updated artifact.
+type TaskArtifactUpdateEvent struct {
+	// ID is the task identifier.
+	ID string `json:"id"`
+	// Artifact contains the artifact data.
+	Artifact Artifact `json:"artifact"`
+	// Metadata contains optional event metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// SendTaskResponse represents a response to a SendTaskRequest.
-type SendTaskResponse struct {
-	Task      Task   `json:"task"`
-	RequestID string `json:"requestId"`
+// AuthenticationInfo represents authentication information.
+type AuthenticationInfo struct {
+	// Schemes is the list of authentication schemes.
+	Schemes []string `json:"schemes"`
+	// Credentials is an optional credential string.
+	Credentials string `json:"credentials,omitzero"`
 }
 
-// GetTaskRequest represents a request to get a task from an A2A server.
-type GetTaskRequest struct {
-	TaskID    string `json:"taskId"`
-	RequestID string `json:"requestId,omitempty"`
-}
-
-var _ Request = (*GetTaskRequest)(nil)
-
-func (GetTaskRequest) request() {}
-
-// Validate validates the GetTaskRequest.
-func (r GetTaskRequest) Validate() error {
-	if r.TaskID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	return nil
-}
-
-// GetTaskResponse represents a response to a GetTaskRequest.
-type GetTaskResponse struct {
-	Task      Task   `json:"task"`
-	RequestID string `json:"requestId"`
-}
-
-// CancelTaskRequest represents a request to cancel a task on an A2A server.
-type CancelTaskRequest struct {
-	TaskID    string `json:"taskId"`
-	RequestID string `json:"requestId,omitempty"`
-}
-
-var _ Request = (*CancelTaskRequest)(nil)
-
-func (CancelTaskRequest) request() {}
-
-// Validate validates the CancelTaskRequest.
-func (r CancelTaskRequest) Validate() error {
-	if r.TaskID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	return nil
-}
-
-// CancelTaskResponse represents a response to a CancelTaskRequest.
-type CancelTaskResponse struct {
-	Task      Task   `json:"task"`
-	RequestID string `json:"requestId"`
-}
-
-// TaskPushNotificationConfig represents the configuration for push notifications for a task.
-type TaskPushNotificationConfig struct {
-	TaskID                 string                 `json:"taskId"`
-	PushNotificationConfig PushNotificationConfig `json:"pushNotificationConfig"`
-}
-
-// PushNotificationConfig represents the configuration for push notifications.
+// PushNotificationConfig represents configuration for push notifications.
 type PushNotificationConfig struct {
-	URL            string              `json:"url"`
-	Token          string              `json:"token,omitempty"`
+	// URL is the endpoint URL for the agent to POST notifications to.
+	URL string `json:"url"`
+	// Token is an optional token for the agent to include.
+	Token string `json:"token,omitzero"`
+	// Authentication contains auth details the agent needs to call the URL.
 	Authentication *AuthenticationInfo `json:"authentication,omitempty"`
 }
 
-// AuthenticationInfo represents authentication information for push notifications.
-type AuthenticationInfo struct {
-	Schemes     []string       `json:"schemes"`
-	Credentials string         `json:"credentials,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+// TaskIDParams represents parameters for methods that require a task ID.
+type TaskIDParams struct {
+	// ID is the unique task identifier.
+	ID string `json:"id"`
+	// Metadata contains optional additional metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// SetTaskPushNotificationRequest represents a request to set push notification configuration for a task.
-type SetTaskPushNotificationRequest struct {
-	TaskID                 string                 `json:"taskId"`
+// TaskQueryParams represents parameters for querying a task.
+type TaskQueryParams struct {
+	TaskIDParams
+
+	// HistoryLength optionally limits the number of historical messages to include.
+	HistoryLength int `json:"historyLength,omitzero"`
+}
+
+// TaskSendParams represents parameters for sending a task.
+type TaskSendParams struct {
+	// ID is the unique task identifier.
+	ID string `json:"id"`
+	// SessionID optionally groups related tasks.
+	SessionID uuid.UUID `json:"sessionId,omitzero"`
+	// Message contains the content to send.
+	Message Message `json:"message"`
+	// AcceptedOutputModes lists the output modes the client can handle.
+	AcceptedOutputModes []string `json:"acceptedOutputModes,omitempty"`
+	// PushNotification optionally configures push notifications for this task.
+	PushNotification *PushNotificationConfig `json:"pushNotification,omitempty"`
+	// HistoryLength optionally limits the number of historical messages to include.
+	HistoryLength int `json:"historyLength,omitzero"`
+	// Metadata contains optional additional metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// TaskPushNotificationConfig associates a PushNotificationConfig with a task ID.
+type TaskPushNotificationConfig struct {
+	// ID is the unique task identifier.
+	ID string `json:"id"`
+	// PushNotificationConfig contains the push notification configuration.
 	PushNotificationConfig PushNotificationConfig `json:"pushNotificationConfig"`
 }
 
-var _ Request = (*SetTaskPushNotificationRequest)(nil)
-
-func (SetTaskPushNotificationRequest) request() {}
-
-// Validate validates the SetTaskPushNotificationRequest.
-func (r SetTaskPushNotificationRequest) Validate() error {
-	if r.TaskID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	if r.PushNotificationConfig.URL == "" {
-		return fmt.Errorf("push notification URL cannot be empty")
-	}
-	return nil
+// AgentProvider represents information about the provider of an agent.
+type AgentProvider struct {
+	// Organization is the name of the organization providing the agent.
+	Organization string `json:"organization"`
+	// URL is an optional URL for the organization.
+	URL string `json:"url,omitzero"`
 }
 
-// GetTaskPushNotificationRequest represents a request to get push notification configuration for a task.
-type GetTaskPushNotificationRequest struct {
-	TaskID    string         `json:"taskId"`
-	RequestID string         `json:"requestId,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+// AgentCapabilities represents the capabilities supported by an agent.
+type AgentCapabilities struct {
+	// Streaming indicates if the agent supports task streaming.
+	Streaming bool `json:"streaming,omitzero"`
+	// PushNotifications indicates if the agent supports push notifications.
+	PushNotifications bool `json:"pushNotifications,omitzero"`
+	// StateTransitionHistory indicates if the agent supports state transition history.
+	StateTransitionHistory bool `json:"stateTransitionHistory,omitzero"`
 }
 
-var _ Request = (*GetTaskPushNotificationRequest)(nil)
-
-func (GetTaskPushNotificationRequest) request() {}
-
-// Validate validates the GetTaskPushNotificationRequest.
-func (r GetTaskPushNotificationRequest) Validate() error {
-	if r.TaskID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	return nil
+// AgentAuthentication represents the authentication schemes and credentials required by an agent.
+type AgentAuthentication struct {
+	// Schemes is the list of authentication schemes supported by the agent.
+	Schemes []string `json:"schemes"`
+	// Credentials is an optional credential string.
+	Credentials string `json:"credentials,omitzero"`
 }
 
-// TaskResubscriptionRequest represents a request to resubscribe to a task's updates.
-type TaskResubscriptionRequest struct {
-	TaskID        string         `json:"taskId"`
-	HistoryLength int            `json:"historyLength,omitempty"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
+// AgentSkill represents a specific capability provided by an agent.
+type AgentSkill struct {
+	// ID is the unique identifier for the skill.
+	ID string `json:"id"`
+	// Name is the human-readable name of the skill.
+	Name string `json:"name"`
+	// Description is an optional description of the skill.
+	Description string `json:"description,omitzero"`
+	// Tags is an optional list of keywords associated with the skill.
+	Tags []string `json:"tags,omitempty"`
+	// Examples is an optional list of usage examples for the skill.
+	Examples []string `json:"examples,omitempty"`
+	// InputModes optionally overrides the default input modes for this skill.
+	InputModes []string `json:"inputModes,omitempty"`
+	// OutputModes optionally overrides the default output modes for this skill.
+	OutputModes []string `json:"outputModes,omitempty"`
 }
 
-var _ Request = (*TaskResubscriptionRequest)(nil)
-
-func (TaskResubscriptionRequest) request() {}
-
-// Validate validates the TaskResubscriptionRequest.
-func (r TaskResubscriptionRequest) Validate() error {
-	if r.TaskID == "" {
-		return fmt.Errorf("task ID cannot be empty")
-	}
-	if r.HistoryLength < 0 {
-		return fmt.Errorf("history length cannot be negative")
-	}
-	return nil
-}
-
-// SetTaskPushNotificationResponse represents a response to a SetTaskPushNotificationRequest.
-type SetTaskPushNotificationResponse struct {
-	Config    TaskPushNotificationConfig `json:"config"`
-	RequestID string                     `json:"requestId"`
-}
-
-// GetTaskPushNotificationResponse represents a response to a GetTaskPushNotificationRequest.
-type GetTaskPushNotificationResponse struct {
-	Config    TaskPushNotificationConfig `json:"config"`
-	RequestID string                     `json:"requestId"`
-}
-
-// TaskStatusUpdateEvent represents an event sent when a task's status changes.
-type TaskStatusUpdateEvent struct {
-	Task      Task   `json:"task"`
-	RequestID string `json:"requestId"`
-}
-
-// GetTaskID returns the task ID for a TaskStatusUpdateEvent.
-func (e TaskStatusUpdateEvent) GetTaskID() string {
-	return e.Task.ID
-}
-
-// Client represents an A2A client.
-type Client interface {
-	SendTask(ctx context.Context, req Request) (*SendTaskResponse, error)
-	GetTask(ctx context.Context, req Request) (*GetTaskResponse, error)
-	CancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error)
-	SetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error)
-	GetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error)
-	ResubscribeTask(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error)
-}
-
-// Server represents an A2A server.
-type Server interface {
-	HandleSendTask(ctx context.Context, req Request) (*SendTaskResponse, error)
-	HandleGetTask(ctx context.Context, req Request) (*GetTaskResponse, error)
-	HandleCancelTask(ctx context.Context, req Request) (*CancelTaskResponse, error)
-	HandleSetTaskPushNotification(ctx context.Context, req Request) (*SetTaskPushNotificationResponse, error)
-	HandleGetTaskPushNotification(ctx context.Context, req Request) (*GetTaskPushNotificationResponse, error)
-	HandleTaskResubscription(ctx context.Context, req Request) (*TaskStatusUpdateEvent, error)
-}
-
-// TaskBuilder helps build a Task with a fluent API.
-type TaskBuilder struct {
-	task Task
-}
-
-// NewTaskBuilder creates a new TaskBuilder.
-func NewTaskBuilder() *TaskBuilder {
-	return &TaskBuilder{
-		task: Task{
-			ID:        uuid.NewString(),
-			State:     TaskStateSubmitted,
-			Messages:  make([]Message, 0),
-			Artifacts: make([]Artifact, 0),
-			Metadata:  make(map[string]any),
-			CreatedAt: time.Now().UTC(),
-		},
-	}
-}
-
-// WithAgentCard sets the AgentCard for the Task.
-func (b *TaskBuilder) WithAgentCard(agentCard AgentCard) *TaskBuilder {
-	b.task.AgentCard = agentCard
-
-	return b
-}
-
-// WithClient sets the client for the Task.
-func (b *TaskBuilder) WithClient(client string) *TaskBuilder {
-	b.task.Client = client
-
-	return b
-}
-
-// AddMessage adds a Message to the Task.
-func (b *TaskBuilder) AddMessage(message Message) *TaskBuilder {
-	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now().UTC()
-	}
-	b.task.Messages = append(b.task.Messages, message)
-	b.task.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// AddArtifact adds an Artifact to the Task.
-func (b *TaskBuilder) AddArtifact(artifact Artifact) *TaskBuilder {
-	if artifact.ID == "" {
-		artifact.ID = uuid.NewString()
-	}
-	if artifact.CreatedAt.IsZero() {
-		artifact.CreatedAt = time.Now().UTC()
-	}
-	b.task.Artifacts = append(b.task.Artifacts, artifact)
-	b.task.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// WithMetadata sets metadata for the Task.
-func (b *TaskBuilder) WithMetadata(key string, value any) *TaskBuilder {
-	b.task.Metadata[key] = value
-	b.task.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// WithState sets the state for the Task.
-func (b *TaskBuilder) WithState(state TaskState) *TaskBuilder {
-	b.task.State = state
-	b.task.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// Build builds the Task.
-func (b *TaskBuilder) Build() Task {
-	return b.task
-}
-
-// MessageBuilder helps build a Message with a fluent API.
-type MessageBuilder struct {
-	message Message
-}
-
-// NewMessageBuilder creates a new MessageBuilder.
-func NewMessageBuilder(role string) *MessageBuilder {
-	return &MessageBuilder{
-		message: Message{
-			Role:      role,
-			Parts:     make([]Part, 0),
-			CreatedAt: time.Now().UTC(),
-		},
-	}
-}
-
-// AddTextPart adds a text part to the Message.
-func (b *MessageBuilder) AddTextPart(text string) *MessageBuilder {
-	b.message.Parts = append(b.message.Parts, Part{
-		Type: "text",
-		Text: text,
-	})
-
-	return b
-}
-
-// AddFilePart adds a file part to the Message.
-func (b *MessageBuilder) AddFilePart(fileName, fileContent string) *MessageBuilder {
-	b.message.Parts = append(b.message.Parts, Part{
-		Type:        "file",
-		FileName:    fileName,
-		FileContent: fileContent,
-	})
-
-	return b
-}
-
-// AddDataPart adds a data part to the Message.
-func (b *MessageBuilder) AddDataPart(dataMIME, data string) *MessageBuilder {
-	b.message.Parts = append(b.message.Parts, Part{
-		Type:     "data",
-		DataMIME: dataMIME,
-		Data:     data,
-	})
-
-	return b
-}
-
-// Build builds the Message.
-func (b *MessageBuilder) Build() Message {
-	return b.message
-}
-
-// ArtifactBuilder helps build an Artifact with a fluent API.
-type ArtifactBuilder struct {
-	artifact Artifact
-}
-
-// NewArtifactBuilder creates a new ArtifactBuilder.
-func NewArtifactBuilder(artifactType string) *ArtifactBuilder {
-	now := time.Now().UTC()
-	return &ArtifactBuilder{
-		artifact: Artifact{
-			ID:        uuid.NewString(),
-			Type:      artifactType,
-			Parts:     make([]Part, 0),
-			Index:     make(map[string]any),
-			Metadata:  make(map[string]any),
-			CreatedAt: now,
-		},
-	}
-}
-
-// AddTextPart adds a text part to the Artifact.
-func (b *ArtifactBuilder) AddTextPart(text string) *ArtifactBuilder {
-	b.artifact.Parts = append(b.artifact.Parts, Part{
-		Type: "text",
-		Text: text,
-	})
-	b.artifact.ModifiedAt = time.Now().UTC()
-	return b
-}
-
-// AddFilePart adds a file part to the Artifact.
-func (b *ArtifactBuilder) AddFilePart(fileName, fileContent string) *ArtifactBuilder {
-	b.artifact.Parts = append(b.artifact.Parts, Part{
-		Type:        "file",
-		FileName:    fileName,
-		FileContent: fileContent,
-	})
-	b.artifact.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// AddDataPart adds a data part to the Artifact.
-func (b *ArtifactBuilder) AddDataPart(dataMIME, data string) *ArtifactBuilder {
-	b.artifact.Parts = append(b.artifact.Parts, Part{
-		Type:     "data",
-		DataMIME: dataMIME,
-		Data:     data,
-	})
-	b.artifact.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// WithIndex adds an index to the Artifact.
-func (b *ArtifactBuilder) WithIndex(key string, value any) *ArtifactBuilder {
-	b.artifact.Index[key] = value
-	b.artifact.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// WithMetadata adds metadata to the Artifact.
-func (b *ArtifactBuilder) WithMetadata(key string, value any) *ArtifactBuilder {
-	b.artifact.Metadata[key] = value
-	b.artifact.ModifiedAt = time.Now().UTC()
-
-	return b
-}
-
-// Build builds the Artifact.
-func (b *ArtifactBuilder) Build() Artifact {
-	return b.artifact
-}
-
-// TaskOptions configures a task to be executed.
-type TaskOptions struct {
-	Timeout time.Duration
-}
-
-// RunTask executes a task on an A2A server.
-func RunTask(ctx context.Context, client Client, task Task, opts TaskOptions) (*Task, error) {
-	if opts.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
-		defer cancel()
-	}
-
-	req := SendTaskRequest{
-		Task: task,
-	}
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid task request: %w", err)
-	}
-
-	resp, err := client.SendTask(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("send task: %w", err)
-	}
-
-	task = resp.Task
-
-	for task.State != TaskStateCompleted && task.State != TaskStateCanceled && task.State != TaskStateFailed {
-		getReq := GetTaskRequest{
-			TaskID:    task.ID,
-			RequestID: resp.RequestID,
-		}
-
-		if err := getReq.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid get task request: %w", err)
-		}
-
-		getResp, err := client.GetTask(ctx, getReq)
-		if err != nil {
-			return nil, fmt.Errorf("get task: %w", err)
-		}
-		task = getResp.Task
-
-		// Simple backoff
-		time.Sleep(1 * time.Second)
-	}
-
-	return &task, nil
+// AgentCard provides metadata about an agent.
+type AgentCard struct {
+	// Name is the human-readable name of the agent.
+	Name string `json:"name"`
+	// Description is an optional description of the agent.
+	Description string `json:"description,omitzero"`
+	// URL is the base URL endpoint for the agent's A2A service.
+	URL string `json:"url"`
+	// Provider contains optional details about the organization providing the agent.
+	Provider *AgentProvider `json:"provider,omitempty"`
+	// Version is the agent/API version.
+	Version string `json:"version"`
+	// DocumentationURL is an optional link to documentation.
+	DocumentationURL string `json:"documentationUrl,omitzero"`
+	// Capabilities defines the features supported by this agent.
+	Capabilities AgentCapabilities `json:"capabilities"`
+	// Authentication defines the authentication schemes and credentials needed.
+	Authentication *AgentAuthentication `json:"authentication,omitempty"`
+	// DefaultInputModes is the list of default supported input types.
+	DefaultInputModes []string `json:"defaultInputModes,omitempty"`
+	// DefaultOutputModes is the list of default supported output types.
+	DefaultOutputModes []string `json:"defaultOutputModes,omitempty"`
+	// Skills is the list of specific capabilities provided by the agent.
+	Skills []AgentSkill `json:"skills"`
 }
