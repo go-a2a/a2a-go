@@ -3,14 +3,15 @@
 
 package a2a
 
-import "strconv"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 // A2A RPC method names.
 const (
 	// MethodTasksSend is the method name for sending a task.
 	MethodTasksSend = "tasks/send"
-	// MethodTasksSendSubscribe is the method name for sending a task and subscribing to updates.
-	MethodTasksSendSubscribe = "tasks/sendSubscribe"
 	// MethodTasksGet is the method name for getting a task.
 	MethodTasksGet = "tasks/get"
 	// MethodTasksCancel is the method name for canceling a task.
@@ -19,6 +20,8 @@ const (
 	MethodTasksPushNotificationSet = "tasks/pushNotification/set"
 	// MethodTasksPushNotificationGet is the method name for getting push notification configuration.
 	MethodTasksPushNotificationGet = "tasks/pushNotification/get"
+	// MethodTasksSendSubscribe is the method name for sending a task and subscribing to updates.
+	MethodTasksSendSubscribe = "tasks/sendSubscribe"
 	// MethodTasksResubscribe is the method name for resubscribing to task updates.
 	MethodTasksResubscribe = "tasks/resubscribe"
 )
@@ -62,7 +65,7 @@ type JSONRPCRequest struct {
 	// Method identifies the operation to perform.
 	Method string `json:"method"`
 	// Params contains parameters for the method.
-	Params map[string]any `json:"params,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
 }
 
 // JSONRPCError represents a JSON-RPC 2.0 error.
