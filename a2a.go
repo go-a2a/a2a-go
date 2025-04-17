@@ -172,6 +172,12 @@ type Task struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// TaskEvent represents an event related to a task.
+type TaskEvent interface {
+	// GetTaskID returns the task ID that this event is for.
+	GetTaskID() string
+}
+
 // TaskStatusUpdateEvent signals a change in task status.
 type TaskStatusUpdateEvent struct {
 	// ID is the task identifier.
@@ -184,6 +190,11 @@ type TaskStatusUpdateEvent struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// GetTaskID implements [TaskEvent].
+func (e *TaskStatusUpdateEvent) GetTaskID() string {
+	return e.ID
+}
+
 // TaskArtifactUpdateEvent signals a new or updated artifact.
 type TaskArtifactUpdateEvent struct {
 	// ID is the task identifier.
@@ -192,6 +203,11 @@ type TaskArtifactUpdateEvent struct {
 	Artifact Artifact `json:"artifact"`
 	// Metadata contains optional event metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// GetTaskID implements [TaskEvent].
+func (e *TaskArtifactUpdateEvent) GetTaskID() string {
+	return e.ID
 }
 
 // AuthenticationInfo represents authentication information.
