@@ -1,604 +1,862 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Package server provides a server implementation for the Google A2A protocol.
 package server
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
-	"net"
+	"io"
+	"log"
 	"net/http"
-	"strconv"
-
-	"github.com/bytedance/sonic"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
+	"sync"
+	"time"
 
 	"github.com/go-a2a/a2a"
 )
 
-// Server is a server for the A2A protocol.
-type Server struct {
-	// host is the host to bind to.
-	host string
+// Common errors that may occur during server operations
+var (
+	ErrTaskNotFound   = errors.New("task not found")
+	ErrInvalidRequest = errors.New("invalid request")
+	ErrMethodNotFound = errors.New("method not found")
+	ErrInternalError  = errors.New("internal server error")
+	ErrInvalidParams  = errors.New("invalid parameters")
+	ErrNotImplemented = errors.New("method not implemented")
+	ErrInvalidTaskID  = errors.New("invalid task ID")
+	ErrInvalidState   = errors.New("invalid task state")
+	ErrUnauthorized   = errors.New("unauthorized")
+)
 
-	// port is the port to listen on.
-	port int
+// JSON-RPC error codes
+const (
+	ErrorCodeParse          = -32700
+	ErrorCodeInvalidRequest = -32600
+	ErrorCodeMethodNotFound = -32601
+	ErrorCodeInvalidParams  = -32602
+	ErrorCodeInternal       = -32603
+	ErrorCodeServerError    = -32000
+)
 
-	// endpoint is the endpoint to expose the API on.
-	endpoint string
+// TaskStore is an interface for storing and retrieving tasks
+type TaskStore interface {
+	// GetTask retrieves a task by ID
+	GetTask(ctx context.Context, id string) (*a2a.Task, error)
 
-	// taskManager is the task manager to use.
-	taskManager TaskManager
+	// CreateTask creates a new task
+	CreateTask(ctx context.Context, task *a2a.Task) error
 
-	// agentCard is the agent card for the server.
-	agentCard a2a.AgentCard
+	// UpdateTask updates an existing task
+	UpdateTask(ctx context.Context, task *a2a.Task) error
 
-	// logger is the logger to use.
-	logger *slog.Logger
+	// DeleteTask deletes a task by ID
+	DeleteTask(ctx context.Context, id string) error
 
-	// tracer is the tracer to use.
-	tracer trace.Tracer
-
-	// server is the HTTP server.
-	server *http.Server
+	// ListTasks lists all tasks, optionally filtered by session ID
+	ListTasks(ctx context.Context, sessionID string) ([]*a2a.Task, error)
 }
 
-var _ a2a.Server = (*Server)(nil)
+// TaskHandler is the interface for handling tasks
+type TaskHandler interface {
+	// HandleTask processes a task and returns the updated task
+	HandleTask(ctx context.Context, task *a2a.Task) (*a2a.Task, error)
 
-// NewServer creates a new [Server].
-func NewServer(host string, port int, endpoint string, agentCard a2a.AgentCard, taskManager TaskManager) *Server {
-	return &Server{
-		host:        host,
-		port:        port,
-		endpoint:    endpoint,
-		taskManager: taskManager,
-		agentCard:   agentCard,
-		logger:      slog.Default(),
-		tracer:      otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
-	}
+	// HandleTaskUpdate processes an update to a task and returns the updated task
+	HandleTaskUpdate(ctx context.Context, task *a2a.Task, message a2a.Message) (*a2a.Task, error)
+
+	// HandleTaskCancel processes a task cancellation request
+	HandleTaskCancel(ctx context.Context, task *a2a.Task, reason string) error
 }
 
-// WithLogger sets the logger for the A2AServer.
-func (s *Server) WithLogger(logger *slog.Logger) *Server {
-	s.logger = logger
-	return s
+// A2AServer is a server for the A2A protocol
+type A2AServer struct {
+	// AgentCard contains metadata about the server
+	AgentCard a2a.AgentCard
+
+	// TaskStore is the store for tasks
+	TaskStore TaskStore
+
+	// TaskHandler is the handler for tasks
+	TaskHandler TaskHandler
+
+	// Path is the path to expose the server on
+	Path string
+
+	// Subscriptions is a map of task ID to subscribers
+	Subscriptions map[string]map[chan<- *a2a.Task]struct{}
+
+	// SubscriptionsMutex is a mutex for the subscriptions map
+	SubscriptionsMutex sync.RWMutex
+
+	// Middleware contains HTTP middleware functions
+	Middleware []func(http.Handler) http.Handler
 }
 
-// WithTracer sets the tracer for the A2AServer.
-func (s *Server) WithTracer(tracer trace.Tracer) *Server {
-	s.tracer = tracer
-	return s
+// ServerOptions contains options for creating a new A2A server
+type ServerOptions struct {
+	AgentCard   a2a.AgentCard
+	TaskStore   TaskStore
+	TaskHandler TaskHandler
+	Path        string
+	Middleware  []func(http.Handler) http.Handler
 }
 
-// Start starts the A2AServer.
-func (s *Server) Start(ctx context.Context) error {
-	if s.agentCard.Name == "" || s.agentCard.URL == "" || s.agentCard.Version == "" {
-		return fmt.Errorf("agent card must have name, URL, and version")
+// NewServer creates a new A2A server
+func NewServer(opts ServerOptions) *A2AServer {
+	// Set default path
+	if opts.Path == "" {
+		opts.Path = "/"
 	}
 
-	if s.taskManager == nil {
-		return fmt.Errorf("task manager cannot be nil")
+	// Set default task store
+	if opts.TaskStore == nil {
+		opts.TaskStore = NewInMemoryTaskStore()
 	}
 
-	mux := http.NewServeMux()
-
-	// Main A2A endpoint
-	mux.HandleFunc(s.endpoint, s.processRequest)
-
-	// Agent card endpoint - serves the agent's metadata
-	mux.HandleFunc("/", s.handleAgentCardRequest)
-
-	addr := net.JoinHostPort(s.host, strconv.Itoa(s.port))
-	s.server = &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	s.logger.InfoContext(ctx, "starting A2A server", "address", addr, "endpoint", s.endpoint)
-
-	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.ErrorContext(ctx, "server error", "error", err)
+	// Set default agent card
+	if opts.AgentCard.Name == "" {
+		opts.AgentCard = a2a.AgentCard{
+			AgentType:   "A2A",
+			Name:        "Go A2A Server",
+			Description: "A Go implementation of the A2A protocol",
+			Version:     a2a.Version,
+			Capabilities: a2a.AgentCapabilities{
+				Streaming:          true,
+				PushNotifications:  false,
+				MultiTurn:          true,
+				MultiTask:          true,
+				DefaultOutputMode:  "text",
+				AcceptedInputModes: []string{"text"},
+			},
 		}
-	}()
-
-	return nil
-}
-
-// Stop stops the A2AServer.
-func (s *Server) Stop(ctx context.Context) error {
-	if s.server == nil {
-		return nil
 	}
 
-	return s.server.Shutdown(ctx)
+	return &A2AServer{
+		AgentCard:     opts.AgentCard,
+		TaskStore:     opts.TaskStore,
+		TaskHandler:   opts.TaskHandler,
+		Path:          opts.Path,
+		Subscriptions: make(map[string]map[chan<- *a2a.Task]struct{}),
+		Middleware:    opts.Middleware,
+	}
 }
 
-// handleAgentCardRequest handles requests for the agent card.
-func (s *Server) handleAgentCardRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+// ServeHTTP implements the http.Handler interface
+func (s *A2AServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Only accept POST requests
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	data, err := sonic.ConfigFastest.Marshal(s.agentCard)
+	// Read request body
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		s.logger.Error("failed to marshal agent card", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		writeRPCError(w, nil, ErrorCodeParse, "Failed to read request body", err)
 		return
 	}
 
-	_, err = w.Write(data)
-	if err != nil {
-		s.logger.Error("failed to write response", "error", err)
+	// Parse request
+	var request a2a.JsonRpcRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		writeRPCError(w, nil, ErrorCodeParse, "Failed to parse request", err)
+		return
+	}
+
+	// Create context
+	ctx := r.Context()
+
+	// Handle request
+	response := s.handleRequest(ctx, request)
+
+	// Handle streaming responses
+	if isStreamingMethod(request.Method) {
+		// Set headers for streaming
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		// Create subscriber channel
+		taskCh := make(chan *a2a.Task)
+
+		// Extract task ID from request
+		taskID := extractTaskIDFromRequest(request)
+		if taskID == "" {
+			writeRPCError(w, request.ID, ErrorCodeInvalidParams, "Invalid task ID", nil)
+			return
+		}
+
+		// Add subscriber
+		s.addSubscriber(taskID, taskCh)
+		defer s.removeSubscriber(taskID, taskCh)
+
+		// Flush initial response if not nil
+		if response != nil && response.Result != nil {
+			if err := writeJSONToStream(w, response); err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
+
+		// Stream updates
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeRPCError(w, request.ID, ErrorCodeInternal, "Streaming not supported", nil)
+			return
+		}
+
+		// Handle streaming method
+		if request.Method == "tasks/sendSubscribe" {
+			// Process the task and send initial update
+			if task, ok := response.Result.(*a2a.Task); ok {
+				s.publishTaskUpdate(task)
+			}
+		}
+
+		// Create a channel to detect when the client disconnects
+		disconnectCh := make(chan struct{})
+		go func() {
+			<-ctx.Done()
+			close(disconnectCh)
+		}()
+
+		// Stream updates
+		for {
+			select {
+			case task, ok := <-taskCh:
+				if !ok {
+					return
+				}
+
+				streamResp := a2a.JsonRpcResponse{
+					JsonRpc: "2.0",
+					ID:      request.ID,
+					Result:  task,
+				}
+
+				if err := writeJSONToStream(w, streamResp); err != nil {
+					return
+				}
+				flusher.Flush()
+
+				// If task is completed, failed, or canceled, stop streaming
+				if task.Status.State == a2a.TaskCompleted ||
+					task.Status.State == a2a.TaskFailed ||
+					task.Status.State == a2a.TaskCanceled {
+					return
+				}
+			case <-disconnectCh:
+				return
+			}
+		}
+	} else {
+		// Write response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding response: %v", err)
+			return
+		}
 	}
 }
 
-// processRequest is the main handler for the A2A API.
-func (s *Server) processRequest(w http.ResponseWriter, r *http.Request) {
-	ctx, span := s.tracer.Start(r.Context(), "a2a.server.processRequest")
-	defer span.End()
+// Handler returns an http.Handler for the server
+func (s *A2AServer) Handler() http.Handler {
+	// Apply middleware
+	var handler http.Handler = s
+	for i := len(s.Middleware) - 1; i >= 0; i-- {
+		handler = s.Middleware[i](handler)
+	}
+	return handler
+}
 
-	if r.Method != http.MethodPost {
-		s.writeError(w, -32600, "Method not allowed")
+// Start starts the server on the specified address
+func (s *A2AServer) Start(addr string) error {
+	mux := http.NewServeMux()
+	mux.Handle(s.Path, s.Handler())
+	return http.ListenAndServe(addr, mux)
+}
+
+// StartTLS starts the server with TLS on the specified address
+func (s *A2AServer) StartTLS(addr, certFile, keyFile string) error {
+	mux := http.NewServeMux()
+	mux.Handle(s.Path, s.Handler())
+	return http.ListenAndServeTLS(addr, certFile, keyFile, mux)
+}
+
+// addSubscriber adds a subscriber for task updates
+func (s *A2AServer) addSubscriber(taskID string, ch chan<- *a2a.Task) {
+	s.SubscriptionsMutex.Lock()
+	defer s.SubscriptionsMutex.Unlock()
+
+	if _, ok := s.Subscriptions[taskID]; !ok {
+		s.Subscriptions[taskID] = make(map[chan<- *a2a.Task]struct{})
+	}
+	s.Subscriptions[taskID][ch] = struct{}{}
+}
+
+// removeSubscriber removes a subscriber for task updates
+func (s *A2AServer) removeSubscriber(taskID string, ch chan<- *a2a.Task) {
+	s.SubscriptionsMutex.Lock()
+	defer s.SubscriptionsMutex.Unlock()
+
+	if subscribers, ok := s.Subscriptions[taskID]; ok {
+		delete(subscribers, ch)
+		if len(subscribers) == 0 {
+			delete(s.Subscriptions, taskID)
+		}
+	}
+}
+
+// publishTaskUpdate sends a task update to all subscribers
+func (s *A2AServer) publishTaskUpdate(task *a2a.Task) {
+	s.SubscriptionsMutex.RLock()
+	defer s.SubscriptionsMutex.RUnlock()
+
+	subscribers, ok := s.Subscriptions[task.ID]
+	if !ok {
 		return
 	}
 
-	// Parse request body
-	var req struct {
-		JsonRPC string          `json:"jsonrpc"`
-		ID      string          `json:"id,omitempty"`
-		Method  string          `json:"method"`
-		Params  json.RawMessage `json:"params"`
+	// Send update to all subscribers
+	for ch := range subscribers {
+		select {
+		case ch <- task:
+			// Update sent successfully
+		default:
+			// Subscriber not ready, skip
+		}
+	}
+}
+
+// handleRequest handles a JSON-RPC request
+func (s *A2AServer) handleRequest(ctx context.Context, request a2a.JsonRpcRequest) *a2a.JsonRpcResponse {
+	// Create response
+	response := &a2a.JsonRpcResponse{
+		JsonRpc: "2.0",
+		ID:      request.ID,
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, -32700, "Invalid JSON payload")
-		return
-	}
-
-	span.SetAttributes(
-		attribute.String("a2a.request_id", req.ID),
-		attribute.String("a2a.method", req.Method),
-	)
-
-	// Handle method
-	var (
-		result any
-		err    error
-	)
-
-	switch req.Method {
-	case "tasks/send":
-		result, err = s.handleSendTask(ctx, req.Params)
+	// Handle request based on method
+	var err error
+	switch request.Method {
+	case "agent/card":
+		response.Result = s.handleAgentCard(ctx, request.Params)
 	case "tasks/get":
-		result, err = s.handleGetTask(ctx, req.Params)
+		response.Result, err = s.handleTasksGet(ctx, request.Params)
+	case "tasks/send":
+		response.Result, err = s.handleTasksSend(ctx, request.Params)
 	case "tasks/cancel":
-		result, err = s.handleCancelTask(ctx, req.Params)
-	case "tasks/pushNotification/set":
-		result, err = s.handleSetTaskPushNotification(ctx, req.Params)
-	case "tasks/pushNotification/get":
-		result, err = s.handleGetTaskPushNotification(ctx, req.Params)
-	case "tasks/resubscribe":
-		result, err = s.handleTaskResubscription(ctx, req.Params)
+		response.Result, err = s.handleTasksCancel(ctx, request.Params)
+	case "tasks/subscribe":
+		response.Result, err = s.handleTasksSubscribe(ctx, request.Params)
 	case "tasks/sendSubscribe":
-		// TODO(zchee): handleSendTaskStreaming writes the response directly
-		result, err = s.handleSendTaskStreaming(ctx, w, req.ID, req.Params)
-		return
+		response.Result, err = s.handleTasksSendSubscribe(ctx, request.Params)
 	default:
-		s.writeError(w, -32601, "Method not found")
-		return
+		err = fmt.Errorf("%w: %s", ErrMethodNotFound, request.Method)
 	}
 
+	// Handle error
 	if err != nil {
-		s.logger.ErrorContext(ctx, "method execution failed", "method", req.Method, "error", err)
-		s.writeError(w, -32603, fmt.Sprintf("Internal error: %v", err))
-		return
+		code := ErrorCodeServerError
+		message := err.Error()
+
+		// Map error to appropriate code
+		switch {
+		case errors.Is(err, ErrMethodNotFound):
+			code = ErrorCodeMethodNotFound
+		case errors.Is(err, ErrInvalidParams):
+			code = ErrorCodeInvalidParams
+		case errors.Is(err, ErrInvalidRequest):
+			code = ErrorCodeInvalidRequest
+		case errors.Is(err, ErrInternalError):
+			code = ErrorCodeInternal
+		}
+
+		response.Error = &a2a.JsonRpcError{
+			Code:    code,
+			Message: message,
+		}
+		response.Result = nil
 	}
 
-	// Write success response
-	resp := struct {
-		JsonRPC string `json:"jsonrpc"`
-		ID      string `json:"id,omitempty"`
-		Result  any    `json:"result"`
-	}{
-		JsonRPC: "2.0",
-		ID:      req.ID,
-		Result:  result,
-	}
-
-	data, err := sonic.ConfigFastest.Marshal(resp)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to marshal response", "error", err)
-		s.writeError(w, -32603, "Internal error serializing response")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(data)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to write response", "error", err)
-	}
+	return response
 }
 
-// writeError writes an error response in JSON-RPC format.
-func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
-	resp := struct {
-		JsonRPC string `json:"jsonrpc"`
-		ID      string `json:"id,omitempty"`
-		Error   struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}{
-		JsonRPC: "2.0",
-		Error: struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}{
+// handleAgentCard handles the agent/card method
+func (s *A2AServer) handleAgentCard(ctx context.Context, params any) any {
+	return s.AgentCard
+}
+
+// handleTasksGet handles the tasks/get method
+func (s *A2AServer) handleTasksGet(ctx context.Context, params any) (any, error) {
+	// Parse parameters
+	var reqParams a2a.TasksGetRequest
+	if err := parseParams(params, &reqParams); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
+	}
+
+	// Validate ID
+	if reqParams.ID == "" {
+		return nil, fmt.Errorf("%w: missing task ID", ErrInvalidParams)
+	}
+
+	// Get task
+	task, err := s.TaskStore.GetTask(ctx, reqParams.ID)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, reqParams.ID)
+		}
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	return task, nil
+}
+
+// handleTasksSend handles the tasks/send method
+func (s *A2AServer) handleTasksSend(ctx context.Context, params any) (any, error) {
+	// Parse parameters
+	var reqParams a2a.TasksSendRequest
+	if err := parseParams(params, &reqParams); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
+	}
+
+	// Validate ID
+	if reqParams.ID == "" {
+		return nil, fmt.Errorf("%w: missing task ID", ErrInvalidParams)
+	}
+
+	// Validate message
+	if len(reqParams.Message.Parts) == 0 {
+		return nil, fmt.Errorf("%w: empty message parts", ErrInvalidParams)
+	}
+
+	// Check if task exists
+	existingTask, err := s.TaskStore.GetTask(ctx, reqParams.ID)
+	if err != nil && !errors.Is(err, ErrTaskNotFound) {
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	if existingTask == nil {
+		// Create new task
+		now := time.Now()
+		task := &a2a.Task{
+			ID:                  reqParams.ID,
+			SessionID:           reqParams.SessionID,
+			Status:              a2a.TaskStatus{State: a2a.TaskSubmitted, Timestamp: now},
+			Artifacts:           []a2a.Artifact{},
+			History:             []a2a.Message{},
+			AcceptedOutputModes: reqParams.AcceptedOutputModes,
+			Metadata:            reqParams.Metadata,
+			ParentTask:          reqParams.ParentTask,
+			PrevTasks:           reqParams.PrevTasks,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+			Message:             &reqParams.Message,
+		}
+
+		// Save task
+		if err := s.TaskStore.CreateTask(ctx, task); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+		}
+
+		// Process task
+		if s.TaskHandler != nil {
+			processedTask, err := s.TaskHandler.HandleTask(ctx, task)
+			if err != nil {
+				// Update task status to failed
+				task.Status.State = a2a.TaskFailed
+				task.Status.Timestamp = time.Now()
+				task.Status.Error = &a2a.TaskError{
+					Code:    "task_handler_error",
+					Message: err.Error(),
+				}
+				s.TaskStore.UpdateTask(ctx, task)
+				return task, nil
+			}
+			task = processedTask
+		}
+
+		// Publish task update
+		s.publishTaskUpdate(task)
+
+		return task, nil
+	}
+
+	// Task exists, process update
+	if s.TaskHandler != nil {
+		updatedTask, err := s.TaskHandler.HandleTaskUpdate(ctx, existingTask, reqParams.Message)
+		if err != nil {
+			// Update task status to failed
+			existingTask.Status.State = a2a.TaskFailed
+			existingTask.Status.Timestamp = time.Now()
+			existingTask.Status.Error = &a2a.TaskError{
+				Code:    "task_handler_error",
+				Message: err.Error(),
+			}
+			s.TaskStore.UpdateTask(ctx, existingTask)
+			return existingTask, nil
+		}
+		existingTask = updatedTask
+	}
+
+	// Add message to history
+	existingTask.History = append(existingTask.History, reqParams.Message)
+	existingTask.UpdatedAt = time.Now()
+
+	// Update task
+	if err := s.TaskStore.UpdateTask(ctx, existingTask); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	// Publish task update
+	s.publishTaskUpdate(existingTask)
+
+	return existingTask, nil
+}
+
+// handleTasksCancel handles the tasks/cancel method
+func (s *A2AServer) handleTasksCancel(ctx context.Context, params any) (any, error) {
+	// Parse parameters
+	var reqParams a2a.TasksCancelRequest
+	if err := parseParams(params, &reqParams); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
+	}
+
+	// Validate ID
+	if reqParams.ID == "" {
+		return nil, fmt.Errorf("%w: missing task ID", ErrInvalidParams)
+	}
+
+	// Get task
+	task, err := s.TaskStore.GetTask(ctx, reqParams.ID)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, reqParams.ID)
+		}
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	// Update task status
+	task.Status.State = a2a.TaskCanceled
+	task.Status.Timestamp = time.Now()
+	if reqParams.Reason != "" {
+		reason := reqParams.Reason
+		task.Status.Reason = &reason
+	}
+
+	// Handle cancel
+	if s.TaskHandler != nil {
+		if err := s.TaskHandler.HandleTaskCancel(ctx, task, reqParams.Reason); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+		}
+	}
+
+	// Update task
+	if err := s.TaskStore.UpdateTask(ctx, task); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	// Publish task update
+	s.publishTaskUpdate(task)
+
+	return task, nil
+}
+
+// handleTasksSubscribe handles the tasks/subscribe method
+func (s *A2AServer) handleTasksSubscribe(ctx context.Context, params any) (any, error) {
+	// Parse parameters
+	var reqParams a2a.TasksSubscribeRequest
+	if err := parseParams(params, &reqParams); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
+	}
+
+	// Validate ID
+	if reqParams.ID == "" {
+		return nil, fmt.Errorf("%w: missing task ID", ErrInvalidParams)
+	}
+
+	// Get task
+	task, err := s.TaskStore.GetTask(ctx, reqParams.ID)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, reqParams.ID)
+		}
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	return task, nil
+}
+
+// handleTasksSendSubscribe handles the tasks/sendSubscribe method
+func (s *A2AServer) handleTasksSendSubscribe(ctx context.Context, params any) (any, error) {
+	// Parse parameters
+	var reqParams a2a.TasksSendSubscribeRequest
+	if err := parseParams(params, &reqParams); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidParams, err)
+	}
+
+	// Validate ID
+	if reqParams.ID == "" {
+		return nil, fmt.Errorf("%w: missing task ID", ErrInvalidParams)
+	}
+
+	// Validate message
+	if len(reqParams.Message.Parts) == 0 {
+		return nil, fmt.Errorf("%w: empty message parts", ErrInvalidParams)
+	}
+
+	// Check if task exists
+	existingTask, err := s.TaskStore.GetTask(ctx, reqParams.ID)
+	if err != nil && !errors.Is(err, ErrTaskNotFound) {
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+	}
+
+	if existingTask == nil {
+		// Create new task
+		now := time.Now()
+		task := &a2a.Task{
+			ID:                  reqParams.ID,
+			SessionID:           reqParams.SessionID,
+			Status:              a2a.TaskStatus{State: a2a.TaskSubmitted, Timestamp: now},
+			Artifacts:           []a2a.Artifact{},
+			History:             []a2a.Message{},
+			AcceptedOutputModes: reqParams.AcceptedOutputModes,
+			Metadata:            reqParams.Metadata,
+			ParentTask:          reqParams.ParentTask,
+			PrevTasks:           reqParams.PrevTasks,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+			Message:             &reqParams.Message,
+		}
+
+		// Save task
+		if err := s.TaskStore.CreateTask(ctx, task); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
+		}
+
+		// Process task asynchronously
+		go func() {
+			if s.TaskHandler != nil {
+				// Update status to working
+				task.Status.State = a2a.TaskWorking
+				task.Status.Timestamp = time.Now()
+				s.TaskStore.UpdateTask(context.Background(), task)
+				s.publishTaskUpdate(task)
+
+				// Process task
+				processedTask, err := s.TaskHandler.HandleTask(context.Background(), task)
+				if err != nil {
+					// Update task status to failed
+					task.Status.State = a2a.TaskFailed
+					task.Status.Timestamp = time.Now()
+					task.Status.Error = &a2a.TaskError{
+						Code:    "task_handler_error",
+						Message: err.Error(),
+					}
+					s.TaskStore.UpdateTask(context.Background(), task)
+					s.publishTaskUpdate(task)
+					return
+				}
+
+				// Update task
+				s.TaskStore.UpdateTask(context.Background(), processedTask)
+				s.publishTaskUpdate(processedTask)
+			}
+		}()
+
+		return task, nil
+	}
+
+	// Task exists, process update asynchronously
+	go func() {
+		if s.TaskHandler != nil {
+			// Update status to working
+			existingTask.Status.State = a2a.TaskWorking
+			existingTask.Status.Timestamp = time.Now()
+			existingTask.Message = &reqParams.Message
+			s.TaskStore.UpdateTask(context.Background(), existingTask)
+			s.publishTaskUpdate(existingTask)
+
+			// Process update
+			updatedTask, err := s.TaskHandler.HandleTaskUpdate(context.Background(), existingTask, reqParams.Message)
+			if err != nil {
+				// Update task status to failed
+				existingTask.Status.State = a2a.TaskFailed
+				existingTask.Status.Timestamp = time.Now()
+				existingTask.Status.Error = &a2a.TaskError{
+					Code:    "task_handler_error",
+					Message: err.Error(),
+				}
+				s.TaskStore.UpdateTask(context.Background(), existingTask)
+				s.publishTaskUpdate(existingTask)
+				return
+			}
+
+			// Add message to history
+			updatedTask.History = append(updatedTask.History, reqParams.Message)
+			updatedTask.UpdatedAt = time.Now()
+
+			// Update task
+			s.TaskStore.UpdateTask(context.Background(), updatedTask)
+			s.publishTaskUpdate(updatedTask)
+		}
+	}()
+
+	return existingTask, nil
+}
+
+// parseParams parses JSON-RPC parameters
+func parseParams(params any, dest any) error {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, dest)
+}
+
+// writeRPCError writes a JSON-RPC error response
+func writeRPCError(w http.ResponseWriter, id any, code int, message string, err error) {
+	errResp := a2a.JsonRpcResponse{
+		JsonRpc: "2.0",
+		ID:      id,
+		Error: &a2a.JsonRpcError{
 			Code:    code,
 			Message: message,
 		},
 	}
 
-	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
-		s.logger.Error("failed to marshal error response", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		errResp.Error.Data = err.Error()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // Error is in the JSON-RPC response, not HTTP
-	_, err = w.Write(data)
-	if err != nil {
-		s.logger.Error("failed to write error response", "error", err)
-	}
-}
-
-// handleSendTask handles the tasks/send method.
-func (s *Server) handleSendTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSendTask")
-	defer span.End()
-
-	var taskParams a2a.Task
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	task, err := s.taskManager.OnSendTask(ctx, &taskParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process task: %w", err)
-	}
-
-	return task, nil
-}
-
-// handleGetTask handles the tasks/get method.
-func (s *Server) handleGetTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleGetTask")
-	defer span.End()
-
-	var taskParams struct {
-		ID string `json:"id"`
-	}
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	task, err := s.taskManager.OnGetTask(ctx, taskParams.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task: %w", err)
-	}
-
-	return task, nil
-}
-
-// handleCancelTask handles the tasks/cancel method.
-func (s *Server) handleCancelTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleCancelTask")
-	defer span.End()
-
-	var taskParams struct {
-		ID string `json:"id"`
-	}
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	task, err := s.taskManager.OnCancelTask(ctx, taskParams.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to cancel task: %w", err)
-	}
-
-	return task, nil
-}
-
-// handleSetTaskPushNotification handles the tasks/pushNotification/set method.
-func (s *Server) handleSetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSetTaskPushNotification")
-	defer span.End()
-
-	var config a2a.TaskPushNotificationConfig
-	if err := sonic.ConfigFastest.Unmarshal(params, &config); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", config.TaskID))
-
-	result, err := s.taskManager.OnSetTaskPushNotification(ctx, &config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set push notification: %w", err)
-	}
-
-	return result, nil
-}
-
-// handleGetTaskPushNotification handles the tasks/pushNotification/get method.
-func (s *Server) handleGetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleGetTaskPushNotification")
-	defer span.End()
-
-	var taskParams struct {
-		ID string `json:"id"`
-	}
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	config, err := s.taskManager.OnGetTaskPushNotification(ctx, taskParams.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get push notification: %w", err)
-	}
-
-	return config, nil
-}
-
-// handleTaskResubscription handles the tasks/resubscribe method.
-func (s *Server) handleTaskResubscription(ctx context.Context, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleTaskResubscription")
-	defer span.End()
-
-	var taskParams struct {
-		ID            string `json:"id"`
-		HistoryLength int    `json:"historyLength,omitempty"`
-	}
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	event, err := s.taskManager.OnResubscribeToTask(ctx, taskParams.ID, taskParams.HistoryLength)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resubscribe to task: %w", err)
-	}
-
-	return event, nil
-}
-
-// handleSendTaskStreaming handles the tasks/sendSubscribe method.
-func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.handleSendTaskStreaming")
-	defer span.End()
-
-	var taskParams a2a.Task
-	if err := sonic.ConfigFastest.Unmarshal(params, &taskParams); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", taskParams.ID))
-
-	// Set up SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(errResp)
+}
 
-	// Create a channel for the task events
-	eventCh, err := s.taskManager.OnSendTaskSubscribe(ctx, taskParams)
+// writeJSONToStream writes a JSON object to a streaming response
+func writeJSONToStream(w io.Writer, v any) error {
+	data, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+		return err
 	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("\n")); err != nil {
+		return err
+	}
+	return nil
+}
 
-	// Flush the headers to the client
-	flusher, ok := w.(http.Flusher)
+// isStreamingMethod checks if a method supports streaming
+func isStreamingMethod(method string) bool {
+	return method == "tasks/subscribe" || method == "tasks/sendSubscribe"
+}
+
+// extractTaskIDFromRequest extracts the task ID from a request
+func extractTaskIDFromRequest(request a2a.JsonRpcRequest) string {
+	switch request.Method {
+	case "tasks/subscribe":
+		var params a2a.TasksSubscribeRequest
+		data, _ := json.Marshal(request.Params)
+		_ = json.Unmarshal(data, &params)
+		return params.ID
+	case "tasks/sendSubscribe":
+		var params a2a.TasksSendSubscribeRequest
+		data, _ := json.Marshal(request.Params)
+		_ = json.Unmarshal(data, &params)
+		return params.ID
+	default:
+		return ""
+	}
+}
+
+// InMemoryTaskStore is an in-memory implementation of TaskStore
+type InMemoryTaskStore struct {
+	tasks map[string]*a2a.Task
+	mutex sync.RWMutex
+}
+
+// NewInMemoryTaskStore creates a new in-memory task store
+func NewInMemoryTaskStore() *InMemoryTaskStore {
+	return &InMemoryTaskStore{
+		tasks: make(map[string]*a2a.Task),
+	}
+}
+
+// GetTask retrieves a task by ID
+func (s *InMemoryTaskStore) GetTask(ctx context.Context, id string) (*a2a.Task, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	task, ok := s.tasks[id]
 	if !ok {
-		return nil, fmt.Errorf("streaming not supported by response writer")
+		return nil, ErrTaskNotFound
+	}
+	return task, nil
+}
+
+// CreateTask creates a new task
+func (s *InMemoryTaskStore) CreateTask(ctx context.Context, task *a2a.Task) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if task already exists
+	if _, ok := s.tasks[task.ID]; ok {
+		return fmt.Errorf("task with ID %s already exists", task.ID)
 	}
 
-	// Begin streaming events
-	for event := range eventCh {
-		// Marshal event to JSON
-		resp := struct {
-			JsonRPC string `json:"jsonrpc"`
-			ID      string `json:"id,omitempty"`
-			Result  any    `json:"result"`
-		}{
-			JsonRPC: "2.0",
-			ID:      id,
-			Result:  event,
+	// Store task
+	s.tasks[task.ID] = task
+	return nil
+}
+
+// UpdateTask updates an existing task
+func (s *InMemoryTaskStore) UpdateTask(ctx context.Context, task *a2a.Task) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if task exists
+	if _, ok := s.tasks[task.ID]; !ok {
+		return ErrTaskNotFound
+	}
+
+	// Update task
+	s.tasks[task.ID] = task
+	return nil
+}
+
+// DeleteTask deletes a task by ID
+func (s *InMemoryTaskStore) DeleteTask(ctx context.Context, id string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if task exists
+	if _, ok := s.tasks[id]; !ok {
+		return ErrTaskNotFound
+	}
+
+	// Delete task
+	delete(s.tasks, id)
+	return nil
+}
+
+// ListTasks lists all tasks, optionally filtered by session ID
+func (s *InMemoryTaskStore) ListTasks(ctx context.Context, sessionID string) ([]*a2a.Task, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	var tasks []*a2a.Task
+	for _, task := range s.tasks {
+		if sessionID == "" || task.SessionID == sessionID {
+			tasks = append(tasks, task)
 		}
-
-		data, err := sonic.ConfigFastest.Marshal(resp)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to marshal event", "error", err)
-			continue
-		}
-
-		// Write event to the client
-		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to write event", "error", err)
-			break
-		}
-
-		flusher.Flush()
 	}
-
-	return nil, nil
-}
-
-// HandleSendTask processes a send task request.
-func (s *Server) HandleSendTask(ctx context.Context, req a2a.Request) (*a2a.SendTaskResponse, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleSendTask")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	sendReq, ok := req.(a2a.SendTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SendTaskRequest but got %T", req)
-	}
-
-	task, err := s.taskManager.OnSendTask(ctx, &sendReq.Task)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process task: %w", err)
-	}
-
-	return &a2a.SendTaskResponse{
-		Task:      *task,
-		RequestID: task.ID,
-	}, nil
-}
-
-// HandleGetTask processes a get task request.
-func (s *Server) HandleGetTask(ctx context.Context, req a2a.Request) (*a2a.GetTaskResponse, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleGetTask")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	getReq, ok := req.(a2a.GetTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskRequest but got %T", req)
-	}
-
-	task, err := s.taskManager.OnGetTask(ctx, getReq.TaskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task: %w", err)
-	}
-
-	return &a2a.GetTaskResponse{
-		Task:      *task,
-		RequestID: getReq.RequestID,
-	}, nil
-}
-
-// HandleCancelTask processes a cancel task request.
-func (s *Server) HandleCancelTask(ctx context.Context, req a2a.Request) (*a2a.CancelTaskResponse, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleCancelTask")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	cancelReq, ok := req.(a2a.CancelTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected CancelTaskRequest but got %T", req)
-	}
-
-	task, err := s.taskManager.OnCancelTask(ctx, cancelReq.TaskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to cancel task: %w", err)
-	}
-
-	return &a2a.CancelTaskResponse{
-		Task:      *task,
-		RequestID: cancelReq.RequestID,
-	}, nil
-}
-
-// HandleSetTaskPushNotification processes a set task push notification request.
-func (s *Server) HandleSetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.SetTaskPushNotificationResponse, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleSetTaskPushNotification")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	pushReq, ok := req.(*a2a.SetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SetTaskPushNotificationRequest but got %T", req)
-	}
-
-	config := (*a2a.TaskPushNotificationConfig)(pushReq)
-	result, err := s.taskManager.OnSetTaskPushNotification(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set push notification: %w", err)
-	}
-
-	return &a2a.SetTaskPushNotificationResponse{
-		Config:    *result,
-		RequestID: "",
-	}, nil
-}
-
-// HandleGetTaskPushNotification processes a get task push notification request.
-func (s *Server) HandleGetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.GetTaskPushNotificationResponse, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleGetTaskPushNotification")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	getPushReq, ok := req.(a2a.GetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskPushNotificationRequest but got %T", req)
-	}
-
-	config, err := s.taskManager.OnGetTaskPushNotification(ctx, getPushReq.TaskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get push notification: %w", err)
-	}
-
-	return &a2a.GetTaskPushNotificationResponse{
-		Config:    *config,
-		RequestID: getPushReq.RequestID,
-	}, nil
-}
-
-// HandleTaskResubscription processes a task resubscription request.
-func (s *Server) HandleTaskResubscription(ctx context.Context, req a2a.Request) (*a2a.TaskStatusUpdateEvent, error) {
-	ctx, span := s.tracer.Start(ctx, "a2a.server.HandleTaskResubscription")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	resubReq, ok := req.(a2a.TaskResubscriptionRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected TaskResubscriptionRequest but got %T", req)
-	}
-
-	event, err := s.taskManager.OnResubscribeToTask(ctx, resubReq.TaskID, resubReq.HistoryLength)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resubscribe to task: %w", err)
-	}
-
-	return event, nil
+	return tasks, nil
 }

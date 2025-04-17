@@ -1,461 +1,569 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Package client provides a client implementation for the Google A2A protocol.
 package client
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
+	"io"
+	"math/rand"
 	"net/http"
 	"time"
-
-	"github.com/bytedance/sonic"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/go-a2a/a2a"
 )
 
-const (
-	defaultTimeout = 30 * time.Second
-	userAgent      = "go-a2a/client " + a2a.Version
+// Common errors that may occur during client operations
+var (
+	ErrInvalidResponse    = errors.New("invalid response from server")
+	ErrRequestFailed      = errors.New("request failed")
+	ErrConnectionFailed   = errors.New("connection failed")
+	ErrTimeout            = errors.New("request timed out")
+	ErrInvalidServerURL   = errors.New("invalid server URL")
+	ErrTaskNotFound       = errors.New("task not found")
+	ErrServerError        = errors.New("server error")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
-// Client is a client for the A2A protocol.
-type Client struct {
-	// httpClient is the HTTP client used for requests.
-	httpClient *http.Client
+// A2AClient is a client for the A2A protocol
+type A2AClient struct {
+	// ServerURL is the URL of the A2A server
+	ServerURL string
 
-	// url is the url of the A2A server.
-	url string
+	// HTTPClient is the HTTP client to use for requests
+	HTTPClient *http.Client
 
-	// agentCard is the agent card for the client.
-	agentCard *a2a.AgentCard
+	// Timeout is the request timeout
+	Timeout time.Duration
 
-	// logger for logging operations.
-	logger *slog.Logger
+	// DefaultSessionID is the default session ID to use for requests
+	DefaultSessionID string
 
-	// tracer for OpenTelemetry tracing.
-	tracer trace.Tracer
+	// AgentCard is the agent card of the server
+	AgentCard *a2a.AgentCard
+
+	// RequestHeaders are additional headers to include in requests
+	RequestHeaders map[string]string
 }
 
-var _ a2a.Client = (*Client)(nil)
+// ClientOptions contains options for creating a new A2A client
+type ClientOptions struct {
+	ServerURL      string
+	HTTPClient     *http.Client
+	Timeout        time.Duration
+	DefaultSession string
+	RequestHeaders map[string]string
+}
 
-// NewClient creates a new [Client] with either an [*a2a.AgentCard] or a direct URL.
-func NewClient(agentCard *a2a.AgentCard, url string) (*Client, error) {
-	if agentCard == nil && url == "" {
-		return nil, fmt.Errorf("either agentCard or url must be provided")
+// DefaultTimeout is the default request timeout
+const DefaultTimeout = 30 * time.Second
+
+// NewClient creates a new A2A client
+func NewClient(serverURL string, opts ...func(*ClientOptions)) (*A2AClient, error) {
+	if serverURL == "" {
+		return nil, ErrInvalidServerURL
 	}
 
-	clientURL := url
-	if agentCard != nil {
-		clientURL = agentCard.URL
+	options := ClientOptions{
+		ServerURL:  serverURL,
+		Timeout:    DefaultTimeout,
+		HTTPClient: http.DefaultClient,
 	}
 
-	return &Client{
-		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-		},
-		url:       clientURL,
-		agentCard: agentCard,
-		logger:    slog.Default(),
-		tracer:    otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a"),
-	}, nil
+	// Apply options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	client := &A2AClient{
+		ServerURL:        serverURL,
+		HTTPClient:       options.HTTPClient,
+		Timeout:          options.Timeout,
+		DefaultSessionID: options.DefaultSession,
+		RequestHeaders:   options.RequestHeaders,
+	}
+
+	return client, nil
 }
 
-// WithHTTPClient sets the HTTP client for the A2AClient.
-func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
-	c.httpClient = httpClient
-	return c
+// WithTimeout sets the request timeout
+func WithTimeout(timeout time.Duration) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.Timeout = timeout
+	}
 }
 
-// WithLogger sets the logger for the A2AClient.
-func (c *Client) WithLogger(logger *slog.Logger) *Client {
-	c.logger = logger
-	return c
+// WithHTTPClient sets the HTTP client
+func WithHTTPClient(httpClient *http.Client) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.HTTPClient = httpClient
+	}
 }
 
-// WithTracer sets the tracer for the A2AClient.
-func (c *Client) WithTracer(tracer trace.Tracer) *Client {
-	c.tracer = tracer
-	return c
+// WithDefaultSession sets the default session ID
+func WithDefaultSession(sessionID string) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.DefaultSession = sessionID
+	}
 }
 
-// makeRequest creates a JSON-RPC request from a method and params.
-func makeRequest(method string, params any, id string) ([]byte, error) {
-	req := struct {
-		JsonRPC string `json:"jsonrpc"`
-		Method  string `json:"method"`
-		Params  any    `json:"params"`
-		ID      string `json:"id,omitempty"`
-	}{
-		JsonRPC: "2.0",
+// WithRequestHeaders sets additional request headers
+func WithRequestHeaders(headers map[string]string) func(*ClientOptions) {
+	return func(o *ClientOptions) {
+		o.RequestHeaders = headers
+	}
+}
+
+// makeRPCRequest sends a JSON-RPC request to the server
+func (c *A2AClient) makeRPCRequest(ctx context.Context, method string, params any) (*a2a.JsonRpcResponse, error) {
+	request := a2a.JsonRpcRequest{
+		JsonRpc: "2.0",
+		ID:      rand.Int(),
 		Method:  method,
 		Params:  params,
-		ID:      id,
 	}
 
-	return sonic.ConfigFastest.Marshal(req)
-}
-
-// sendRequest makes an HTTP request to the A2A server.
-func (c *Client) sendRequest(ctx context.Context, method string, params any, id string) ([]byte, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.sendRequest",
-		trace.WithAttributes(
-			attribute.String("a2a.method", method),
-			attribute.String("a2a.request_id", id),
-		))
-	defer span.End()
-
-	data, err := makeRequest(method, params, id)
+	jsonData, err := json.Marshal(request)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to create request", "error", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", c.ServerURL, bytes.NewBuffer(jsonData))
+	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewBuffer(data))
-	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to create HTTP request", "error", err)
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
+	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", userAgent)
+	for key, value := range c.RequestHeaders {
+		req.Header.Set(key, value)
+	}
 
-	resp, err := c.httpClient.Do(req)
+	// Send request
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to send HTTP request", "error", err)
-		return nil, fmt.Errorf("failed to send HTTP request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrConnectionFailed, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		c.logger.ErrorContext(ctx, "HTTP request failed", "status", resp.Status)
-		return nil, fmt.Errorf("HTTP request failed with status: %s", resp.Status)
+	// Check status code
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%w: %s", ErrRequestFailed, resp.Status)
 	}
 
-	respBody := make([]byte, 0)
-	buf := bytes.NewBuffer(respBody)
-	_, err = buf.ReadFrom(resp.Body)
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "failed to read response body", "error", err)
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	// Parse response
+	var response a2a.JsonRpcResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+
+	// Check for JSON-RPC error
+	if response.Error != nil {
+		return &response, fmt.Errorf("%w: %s (code: %d)", ErrServerError, response.Error.Message, response.Error.Code)
+	}
+
+	return &response, nil
 }
 
-// SendTask sends a task to an A2A server.
-func (c *Client) SendTask(ctx context.Context, req a2a.Request) (*a2a.SendTaskResponse, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.SendTask")
-	defer span.End()
+// FetchAgentCard retrieves the agent card from the server
+func (c *A2AClient) FetchAgentCard(ctx context.Context) (*a2a.AgentCard, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
 
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	sendReq, ok := req.(a2a.SendTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SendTaskRequest but got %T", req)
-	}
-
-	reqID := sendReq.Task.ID
-	span.SetAttributes(attribute.String("a2a.task_id", reqID))
-
-	responseData, err := c.sendRequest(ctx, "tasks/send", sendReq.Task, reqID)
+	params := a2a.AgentCardRequest{}
+	resp, err := c.makeRPCRequest(ctx, "agent/card", params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send task: %w", err)
+		return nil, err
 	}
 
-	var jsonRPCResp struct {
-		JsonRPC string          `json:"jsonrpc"`
-		Result  a2a.Task        `json:"result"`
-		Error   json.RawMessage `json:"error"`
+	var card a2a.AgentCard
+	b, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to marshal response result", ErrInvalidResponse)
 	}
 
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.Unmarshal(b, &card); err != nil {
+		return nil, fmt.Errorf("%w: failed to unmarshal agent card", ErrInvalidResponse)
 	}
 
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
-	}
-
-	return &a2a.SendTaskResponse{
-		Task:      jsonRPCResp.Result,
-		RequestID: reqID,
-	}, nil
+	c.AgentCard = &card
+	return &card, nil
 }
 
-// GetTask retrieves a task from an A2A server.
-func (c *Client) GetTask(ctx context.Context, req a2a.Request) (*a2a.GetTaskResponse, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.GetTask")
-	defer span.End()
+// GetTask retrieves information about a task
+func (c *A2AClient) GetTask(ctx context.Context, taskID string) (*a2a.Task, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
 
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
+	params := a2a.TasksGetRequest{
+		ID: taskID,
 	}
 
-	getReq, ok := req.(a2a.GetTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", getReq.TaskID))
-
-	params := map[string]string{
-		"id": getReq.TaskID,
-	}
-
-	responseData, err := c.sendRequest(ctx, "tasks/get", params, getReq.RequestID)
+	resp, err := c.makeRPCRequest(ctx, "tasks/get", params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get task: %w", err)
+		return nil, err
 	}
 
-	var jsonRPCResp struct {
-		JsonRPC string          `json:"jsonrpc"`
-		Result  a2a.Task        `json:"result"`
-		Error   json.RawMessage `json:"error"`
+	var task a2a.Task
+	b, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to marshal response result", ErrInvalidResponse)
 	}
 
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.Unmarshal(b, &task); err != nil {
+		return nil, fmt.Errorf("%w: failed to unmarshal task", ErrInvalidResponse)
 	}
 
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
-	}
-
-	return &a2a.GetTaskResponse{
-		Task:      jsonRPCResp.Result,
-		RequestID: getReq.RequestID,
-	}, nil
+	return &task, nil
 }
 
-// CancelTask cancels a task on an A2A server.
-func (c *Client) CancelTask(ctx context.Context, req a2a.Request) (*a2a.CancelTaskResponse, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.CancelTask")
-	defer span.End()
+// SendTask sends a new task or continues an existing task
+func (c *A2AClient) SendTask(ctx context.Context, taskOpts TaskOptions) (*a2a.Task, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
 
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
+	// Generate a task ID if not provided
+	if taskOpts.ID == "" {
+		taskOpts.ID = generateTaskID()
 	}
 
-	cancelReq, ok := req.(a2a.CancelTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected CancelTaskRequest but got %T", req)
+	// Use default session ID if not provided
+	if taskOpts.SessionID == "" {
+		taskOpts.SessionID = c.DefaultSessionID
 	}
 
-	span.SetAttributes(attribute.String("a2a.task_id", cancelReq.TaskID))
-
-	params := map[string]string{
-		"id": cancelReq.TaskID,
+	params := a2a.TasksSendRequest{
+		ID:                  taskOpts.ID,
+		SessionID:           taskOpts.SessionID,
+		AcceptedOutputModes: taskOpts.AcceptedOutputModes,
+		Message:             taskOpts.Message,
+		ParentTask:          taskOpts.ParentTask,
+		PrevTasks:           taskOpts.PrevTasks,
+		Metadata:            taskOpts.Metadata,
 	}
 
-	responseData, err := c.sendRequest(ctx, "tasks/cancel", params, cancelReq.RequestID)
+	resp, err := c.makeRPCRequest(ctx, "tasks/send", params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to cancel task: %w", err)
+		return nil, err
 	}
 
-	var jsonRPCResp struct {
-		JsonRPC string          `json:"jsonrpc"`
-		Result  a2a.Task        `json:"result"`
-		Error   json.RawMessage `json:"error"`
+	var task a2a.Task
+	b, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to marshal response result", ErrInvalidResponse)
 	}
 
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.Unmarshal(b, &task); err != nil {
+		return nil, fmt.Errorf("%w: failed to unmarshal task", ErrInvalidResponse)
 	}
 
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
-	}
-
-	return &a2a.CancelTaskResponse{
-		Task:      jsonRPCResp.Result,
-		RequestID: cancelReq.RequestID,
-	}, nil
+	return &task, nil
 }
 
-// SetTaskPushNotification configures push notification for a task.
-func (c *Client) SetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.SetTaskPushNotificationResponse, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.SetTaskPushNotification")
-	defer span.End()
+// CancelTask cancels a task
+func (c *A2AClient) CancelTask(ctx context.Context, taskID string, reason string) error {
+	ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
 
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
+	params := a2a.TasksCancelRequest{
+		ID:     taskID,
+		Reason: reason,
 	}
 
-	pushReq, ok := req.(a2a.SetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SetTaskPushNotificationRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", pushReq.TaskID))
-
-	params := a2a.SetTaskPushNotificationRequest{
-		TaskID:                 pushReq.TaskID,
-		PushNotificationConfig: pushReq.PushNotificationConfig,
-	}
-
-	responseData, err := c.sendRequest(ctx, "tasks/pushNotification/set", params, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to set task push notification: %w", err)
-	}
-
-	var jsonRPCResp struct {
-		JsonRPC string                         `json:"jsonrpc"`
-		Result  a2a.TaskPushNotificationConfig `json:"result"`
-		Error   json.RawMessage                `json:"error"`
-	}
-
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
-	}
-
-	return &a2a.SetTaskPushNotificationResponse{
-		Config:    jsonRPCResp.Result,
-		RequestID: "",
-	}, nil
+	_, err := c.makeRPCRequest(ctx, "tasks/cancel", params)
+	return err
 }
 
-// GetTaskPushNotification retrieves push notification configuration for a task.
-func (c *Client) GetTaskPushNotification(ctx context.Context, req a2a.Request) (*a2a.GetTaskPushNotificationResponse, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.GetTaskPushNotification")
-	defer span.End()
+// SubscribeTask subscribes to updates for a task
+func (c *A2AClient) SubscribeTask(ctx context.Context, taskID string) (<-chan *a2a.Task, error) {
+	// Create a context that can be canceled
+	ctx, cancel := context.WithCancel(ctx)
 
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	getPushReq, ok := req.(a2a.GetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskPushNotificationRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", getPushReq.TaskID))
-
-	params := map[string]any{
-		"id":       getPushReq.TaskID,
-		"metadata": getPushReq.Metadata,
-	}
-
-	responseData, err := c.sendRequest(ctx, "tasks/pushNotification/get", params, getPushReq.RequestID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task push notification: %w", err)
-	}
-
-	var jsonRPCResp struct {
-		JsonRPC string                         `json:"jsonrpc"`
-		Result  a2a.TaskPushNotificationConfig `json:"result"`
-		Error   json.RawMessage                `json:"error"`
-	}
-
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
+	// Check if the server supports streaming
+	if c.AgentCard == nil {
+		if _, err := c.FetchAgentCard(ctx); err != nil {
+			cancel()
+			return nil, err
 		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &a2a.GetTaskPushNotificationResponse{
-		Config:    jsonRPCResp.Result,
-		RequestID: getPushReq.RequestID,
-	}, nil
+	if !c.AgentCard.Capabilities.Streaming {
+		cancel()
+		return nil, errors.New("server does not support streaming")
+	}
+
+	params := a2a.TasksSubscribeRequest{
+		ID: taskID,
+	}
+
+	// Create a channel to send task updates
+	taskCh := make(chan *a2a.Task)
+
+	// Start a goroutine to handle the streaming response
+	go func() {
+		defer close(taskCh)
+		defer cancel()
+
+		// Create HTTP request
+		jsonData, err := json.Marshal(a2a.JsonRpcRequest{
+			JsonRpc: "2.0",
+			ID:      rand.Int(),
+			Method:  "tasks/subscribe",
+			Params:  params,
+		})
+		if err != nil {
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.ServerURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return
+		}
+
+		// Set headers
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		for key, value := range c.RequestHeaders {
+			req.Header.Set(key, value)
+		}
+
+		// Send request
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+
+		// Check status code
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return
+		}
+
+		// Read response line by line
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			// Check if context is done
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				// Continue processing
+			}
+
+			// Parse response
+			var response a2a.JsonRpcResponse
+			if err := decoder.Decode(&response); err != nil {
+				if err == io.EOF {
+					return
+				}
+				continue
+			}
+
+			// Check for JSON-RPC error
+			if response.Error != nil {
+				continue
+			}
+
+			// Parse task
+			var task a2a.Task
+			b, err := json.Marshal(response.Result)
+			if err != nil {
+				continue
+			}
+
+			if err := json.Unmarshal(b, &task); err != nil {
+				continue
+			}
+
+			// Send task update
+			select {
+			case taskCh <- &task:
+				// Sent successfully
+			case <-ctx.Done():
+				return
+			}
+
+			// If task is completed, failed, or canceled, stop streaming
+			if task.Status.State == a2a.TaskCompleted ||
+				task.Status.State == a2a.TaskFailed ||
+				task.Status.State == a2a.TaskCanceled {
+				return
+			}
+		}
+	}()
+
+	return taskCh, nil
 }
 
-// ResubscribeTask resubscribes to a task's updates.
-func (c *Client) ResubscribeTask(ctx context.Context, req a2a.Request) (*a2a.TaskStatusUpdateEvent, error) {
-	ctx, span := c.tracer.Start(ctx, "a2a.client.ResubscribeTask")
-	defer span.End()
-
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-
-	resubReq, ok := req.(a2a.TaskResubscriptionRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected TaskResubscriptionRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", resubReq.TaskID))
-
-	params := map[string]any{
-		"id":            resubReq.TaskID,
-		"historyLength": resubReq.HistoryLength,
-		"metadata":      resubReq.Metadata,
-	}
-
-	responseData, err := c.sendRequest(ctx, "tasks/resubscribe", params, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to resubscribe to task: %w", err)
-	}
-
-	var jsonRPCResp struct {
-		JsonRPC string                    `json:"jsonrpc"`
-		Result  a2a.TaskStatusUpdateEvent `json:"result"`
-		Error   json.RawMessage           `json:"error"`
-	}
-
-	if err := sonic.ConfigFastest.Unmarshal(responseData, &jsonRPCResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(jsonRPCResp.Error) > 0 && string(jsonRPCResp.Error) != "null" {
-		var rpcError struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
+// SendTaskAndSubscribe sends a task and subscribes to updates
+func (c *A2AClient) SendTaskAndSubscribe(ctx context.Context, taskOpts TaskOptions) (<-chan *a2a.Task, error) {
+	// Check if the server supports streaming
+	if c.AgentCard == nil {
+		if _, err := c.FetchAgentCard(ctx); err != nil {
+			return nil, err
 		}
-		if err := sonic.ConfigFastest.Unmarshal(jsonRPCResp.Error, &rpcError); err != nil {
-			return nil, fmt.Errorf("failed to parse error: %w", err)
-		}
-		return nil, fmt.Errorf("RPC error: [%d] %s", rpcError.Code, rpcError.Message)
 	}
 
-	return &jsonRPCResp.Result, nil
+	if !c.AgentCard.Capabilities.Streaming {
+		return nil, errors.New("server does not support streaming")
+	}
+
+	// Generate a task ID if not provided
+	if taskOpts.ID == "" {
+		taskOpts.ID = generateTaskID()
+	}
+
+	// Use default session ID if not provided
+	if taskOpts.SessionID == "" {
+		taskOpts.SessionID = c.DefaultSessionID
+	}
+
+	// Create a channel to send task updates
+	taskCh := make(chan *a2a.Task)
+
+	// Create a context that can be canceled
+	ctx, cancel := context.WithCancel(ctx)
+
+	params := a2a.TasksSendSubscribeRequest{
+		ID:                  taskOpts.ID,
+		SessionID:           taskOpts.SessionID,
+		AcceptedOutputModes: taskOpts.AcceptedOutputModes,
+		Message:             taskOpts.Message,
+		ParentTask:          taskOpts.ParentTask,
+		PrevTasks:           taskOpts.PrevTasks,
+		Metadata:            taskOpts.Metadata,
+	}
+
+	// Start a goroutine to handle the streaming response
+	go func() {
+		defer close(taskCh)
+		defer cancel()
+
+		// Create HTTP request
+		jsonData, err := json.Marshal(a2a.JsonRpcRequest{
+			JsonRpc: "2.0",
+			ID:      rand.Int(),
+			Method:  "tasks/sendSubscribe",
+			Params:  params,
+		})
+		if err != nil {
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.ServerURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return
+		}
+
+		// Set headers
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		for key, value := range c.RequestHeaders {
+			req.Header.Set(key, value)
+		}
+
+		// Send request
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+
+		// Check status code
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return
+		}
+
+		// Read response line by line
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			// Check if context is done
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				// Continue processing
+			}
+
+			// Parse response
+			var response a2a.JsonRpcResponse
+			if err := decoder.Decode(&response); err != nil {
+				if err == io.EOF {
+					return
+				}
+				continue
+			}
+
+			// Check for JSON-RPC error
+			if response.Error != nil {
+				continue
+			}
+
+			// Parse task
+			var task a2a.Task
+			b, err := json.Marshal(response.Result)
+			if err != nil {
+				continue
+			}
+
+			if err := json.Unmarshal(b, &task); err != nil {
+				continue
+			}
+
+			// Send task update
+			select {
+			case taskCh <- &task:
+				// Sent successfully
+			case <-ctx.Done():
+				return
+			}
+
+			// If task is completed, failed, or canceled, stop streaming
+			if task.Status.State == a2a.TaskCompleted ||
+				task.Status.State == a2a.TaskFailed ||
+				task.Status.State == a2a.TaskCanceled {
+				return
+			}
+		}
+	}()
+
+	return taskCh, nil
+}
+
+// TaskOptions contains options for sending a task
+type TaskOptions struct {
+	ID                  string
+	SessionID           string
+	AcceptedOutputModes []string
+	Message             a2a.Message
+	ParentTask          *a2a.ParentTask
+	PrevTasks           []*a2a.ParentTask
+	Metadata            any
+}
+
+// generateTaskID generates a random task ID
+func generateTaskID() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const length = 16
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[r.Intn(len(charset))]
+	}
+
+	return string(b)
 }
