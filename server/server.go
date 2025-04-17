@@ -157,10 +157,20 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 		result, err = s.handleGetTaskPushNotification(ctx, req.Params)
 	case a2a.MethodTasksSendSubscribe:
 		// TODO(zchee): handleSendTaskStreaming writes the response directly
-		result, err = s.handleSendTaskStreaming(ctx, w, req.ID.String(), req.Params)
+		_, err = s.handleSendTaskStreaming(ctx, w, req.ID.String(), req.Params)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "handle SendTaskStreaming", slog.Any("error", err))
+			s.writeError(w, a2a.InternalErrorCode, "Internal error: handle SendTaskStreaming")
+		}
 		return
 	case a2a.MethodTasksResubscribe:
-		result, err = s.handleTaskResubscription(ctx, req.Params)
+		// TODO(zchee): handleTaskResubscription writes the response directly
+		_, err = s.handleTaskResubscription(ctx, w, req.ID.String(), req.Params)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "handle TaskResubscription", slog.Any("error", err))
+			s.writeError(w, a2a.InternalErrorCode, "Internal error: handle TaskResubscription")
+		}
+		return
 	default:
 		s.writeError(w, a2a.MethodNotFoundErrorCode, "Method not found")
 		return
@@ -324,7 +334,7 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 	ctx, span := s.tracer.Start(ctx, "server.handleSendTaskStreaming")
 	defer span.End()
 
-	var req a2a.TaskResubscriptionRequest
+	var req a2a.SendTaskStreamingRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
@@ -377,21 +387,63 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 }
 
 // handleTaskResubscription handles the tasks/resubscribe method.
-func (s *Server) handleTaskResubscription(ctx context.Context, params json.RawMessage) (any, error) {
+func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "server.handleTaskResubscription")
 	defer span.End()
 
-	var req a2a.SendTaskStreamingRequest
+	var req a2a.TaskResubscriptionRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
-	resp, err := s.taskManager.OnResubscribeToTask(ctx, &req)
+	// Set up SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	// Create a channel for the task events
+	eventCh, err := s.taskManager.OnResubscribeToTask(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("resubscribe to task: %w", err)
+		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
 	}
 
-	return resp.Result, nil
+	// Flush the headers to the client
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, fmt.Errorf("streaming not supported by response writer")
+	}
+
+	ch, ok := eventCh.(<-chan a2a.TaskEvent)
+	if !ok {
+		return nil, nil
+	}
+
+	// Begin streaming events
+	for event := range ch {
+		// Marshal event to JSON
+		resp := a2a.JSONRPCResponse{
+			JSONRPCMessage: a2a.NewJSONRPCMessage(id),
+			Result:         event,
+		}
+
+		data, err := sonic.ConfigFastest.Marshal(resp)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to marshal event", "error", err)
+			continue
+		}
+
+		// Write event to the client
+		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to write event", "error", err)
+			break
+		}
+
+		flusher.Flush()
+	}
+
+	return nil, nil
 }
