@@ -3,6 +3,8 @@
 
 package a2a
 
+import "strconv"
+
 // A2A RPC method names.
 const (
 	// MethodTasksSend is the method name for sending a task.
@@ -21,19 +23,35 @@ const (
 	MethodTasksResubscribe = "tasks/resubscribe"
 )
 
+// ID represents the unique identifier for JSON-RPC messages.
+type ID struct {
+	any
+}
+
+func (id ID) String() string {
+	switch id := id.any.(type) {
+	case string:
+		return id
+	case float64:
+		return strconv.FormatFloat(id, 'f', 0, 64)
+	default:
+		panic("unreachable")
+	}
+}
+
 // JSONRPCMessage is the base structure for all JSON-RPC 2.0 messages.
 type JSONRPCMessage struct {
 	// JSONRPC version, always "2.0".
 	JSONRPC string `json:"jsonrpc"`
 	// ID is a unique identifier for the request/response correlation.
-	ID any `json:"id,omitempty"` // string, number, or null
+	ID ID `json:"id,omitzero"` // string, number, or null
 }
 
 // NewJSONRPCMessage creates a new [JSONRPCMessage] with the given id.
 func NewJSONRPCMessage(id any) JSONRPCMessage {
 	return JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      ID{id},
 	}
 }
 
