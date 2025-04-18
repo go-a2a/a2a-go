@@ -68,16 +68,6 @@ type JSONRPCRequest struct {
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
-// JSONRPCError represents a JSON-RPC 2.0 error.
-type JSONRPCError struct {
-	// Code is the error code.
-	Code int `json:"code"`
-	// Message is a short description of the error.
-	Message string `json:"message"`
-	// Data contains optional additional error details.
-	Data any `json:"data,omitempty"`
-}
-
 // JSONRPCResponse represents a JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
 	JSONRPCMessage
@@ -122,19 +112,19 @@ func NewSendTaskRequest(id any, params TaskSendParams) SendTaskRequest {
 
 // SendTaskResponse represents a response to a [SendTaskRequest].
 type SendTaskResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains the task if successful.
 	Result *Task `json:"result,omitempty"`
-	// Error contains error details if the request failed.
-	Error *JSONRPCError `json:"error,omitempty"`
 }
 
 // NewSendTaskResponse creates a new [SendTaskResponse].
 func NewSendTaskResponse(id any, result *Task) SendTaskResponse {
 	return SendTaskResponse{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Result:         result,
+		JSONRPCResponse: JSONRPCResponse{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+		},
+		Result: result,
 	}
 }
 
@@ -165,10 +155,12 @@ func NewSendTaskStreamingRequest(id any, params TaskSendParams) SendTaskStreamin
 
 // SendTaskStreamingResponse represents a streaming response event for a [SendTaskStreamingRequest].
 type SendTaskStreamingResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains either a [TaskStatusUpdateEvent] or [TaskArtifactUpdateEvent].
-	Result any `json:"result,omitempty"`
+	Result TaskEvent `json:"result,omitempty"`
+	// Error contains error details if the request failed.
+	Error *JSONRPCError `json:"error,omitempty"`
 }
 
 // GetTaskRequest represents a request to retrieve the current state of a task.
@@ -198,7 +190,7 @@ func NewGetTaskRequest(id any, params TaskQueryParams) GetTaskRequest {
 
 // GetTaskResponse represents a response to a GetTaskRequest.
 type GetTaskResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains the task if successful.
 	Result *Task `json:"result,omitempty"`
@@ -231,7 +223,7 @@ func NewCancelTaskRequest(id any, params TaskIDParams) CancelTaskRequest {
 
 // CancelTaskResponse represents a response to a CancelTaskRequest.
 type CancelTaskResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains the updated task if successful.
 	Result *Task `json:"result,omitempty"`
@@ -264,7 +256,7 @@ func NewSetTaskPushNotificationRequest(id any, params TaskPushNotificationConfig
 
 // SetTaskPushNotificationResponse represents a response to a SetTaskPushNotificationRequest.
 type SetTaskPushNotificationResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains the confirmed config if successful.
 	Result *TaskPushNotificationConfig `json:"result,omitempty"`
@@ -297,7 +289,7 @@ func NewGetTaskPushNotificationRequest(id any, params TaskIDParams) GetTaskPushN
 
 // GetTaskPushNotificationResponse represents a response to a [GetTaskPushNotificationRequest].
 type GetTaskPushNotificationResponse struct {
-	JSONRPCMessage
+	JSONRPCResponse
 
 	// Result contains the push notification config if successful.
 	Result *TaskPushNotificationConfig `json:"result,omitempty"`
@@ -355,6 +347,16 @@ const (
 	// ContentTypeNotSupportedErrorCode indicates a mismatch in supported content types.
 	ContentTypeNotSupportedErrorCode = -32005
 )
+
+// JSONRPCError represents a JSON-RPC 2.0 error.
+type JSONRPCError struct {
+	// Code is the error code.
+	Code int `json:"code"`
+	// Message is a short description of the error.
+	Message string `json:"message"`
+	// Data contains optional additional error details.
+	Data any `json:"data,omitempty"`
+}
 
 // NewJSONParseError creates a new JSONParseError.
 func NewJSONParseError() *JSONRPCError {
