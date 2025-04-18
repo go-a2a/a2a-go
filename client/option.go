@@ -7,8 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-a2a/a2a"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/go-a2a/a2a"
 )
 
 // ClientOption represents an option for configuring the [Client].
