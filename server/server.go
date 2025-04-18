@@ -189,10 +189,10 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 		Result:         result,
 	}
 
-	data, err := sonic.ConfigFastest.Marshal(resp)
+	data, err := sonic.ConfigFastest.Marshal(&resp)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "marshal response", slog.Any("error", err))
-		s.writeError(w, a2a.InternalErrorCode, "Internal error: serializing response")
+		s.writeError(w, a2a.InternalErrorCode, "Internal error: marshal response")
 		return
 	}
 
@@ -206,7 +206,7 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 
 // writeError writes an error response in JSON-RPC format.
 func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
-	resp := a2a.JSONRPCResponse{
+	resp := &a2a.JSONRPCResponse{
 		JSONRPCMessage: a2a.JSONRPCMessage{
 			JSONRPC: "2.0",
 		},
@@ -218,7 +218,7 @@ func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
 	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
 		s.logger.Error("marshal error response", slog.Any("error", err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		http.Error(w, "Marshal error response", http.StatusInternalServerError)
 		return
 	}
 
@@ -363,7 +363,7 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 	// Begin streaming events
 	for event := range eventCh {
 		// Marshal event to JSON
-		resp := a2a.JSONRPCResponse{
+		resp := &a2a.JSONRPCResponse{
 			JSONRPCMessage: a2a.NewJSONRPCMessage(id),
 			Result:         event,
 		}
@@ -425,7 +425,7 @@ func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWr
 	// Begin streaming events
 	for event := range ch {
 		// Marshal event to JSON
-		resp := a2a.JSONRPCResponse{
+		resp := &a2a.JSONRPCResponse{
 			JSONRPCMessage: a2a.NewJSONRPCMessage(id),
 			Result:         event,
 		}

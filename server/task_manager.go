@@ -119,8 +119,10 @@ func (tm *InMemoryTaskManager) OnGetTask(ctx context.Context, req *a2a.GetTaskRe
 	tm.logger.InfoContext(ctx, "task retrieved", slog.String("task_id", taskID), slog.String("state", string(task.Status.State)))
 
 	return &a2a.GetTaskResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		Result:         task,
+		JSONRPCResponse: a2a.JSONRPCResponse{
+			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+		},
+		Result: task,
 	}, nil
 }
 
@@ -168,8 +170,10 @@ func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, req *a2a.Cancel
 	tm.logger.InfoContext(ctx, "task canceled", slog.String("task_id", taskID))
 
 	return &a2a.CancelTaskResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		Result:         task,
+		JSONRPCResponse: a2a.JSONRPCResponse{
+			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+		},
+		Result: task,
 	}, nil
 }
 
@@ -219,8 +223,10 @@ func (tm *InMemoryTaskManager) OnSetTaskPushNotification(ctx context.Context, re
 	tm.logger.InfoContext(ctx, "task push notification configured", slog.String("task_id", task.ID))
 
 	return &a2a.SetTaskPushNotificationResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		Result:         &task,
+		JSONRPCResponse: a2a.JSONRPCResponse{
+			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+		},
+		Result: &task,
 	}, nil
 }
 
@@ -259,8 +265,10 @@ func (tm *InMemoryTaskManager) OnGetTaskPushNotification(ctx context.Context, re
 	tm.logger.InfoContext(ctx, "task push notification retrieved", slog.String("task_id", task.ID))
 
 	return &a2a.GetTaskPushNotificationResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		Result:         &config,
+		JSONRPCResponse: a2a.JSONRPCResponse{
+			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+		},
+		Result: &config,
 	}, nil
 }
 
