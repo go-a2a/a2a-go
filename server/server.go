@@ -1,6 +1,7 @@
 // Copyright 2025 The Go A2A Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Package server provides an implementation of the A2A protocol server.
 package server
 
 import (
