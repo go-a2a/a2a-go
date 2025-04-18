@@ -107,7 +107,7 @@ type SendTaskRequest struct {
 var _ A2ARequest = (*SendTaskRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (SendTaskRequest) MethodName() string {
+func (*SendTaskRequest) MethodName() string {
 	return MethodTasksSend
 }
 
@@ -150,7 +150,7 @@ type SendTaskStreamingRequest struct {
 var _ A2ARequest = (*SendTaskStreamingRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (SendTaskStreamingRequest) MethodName() string {
+func (*SendTaskStreamingRequest) MethodName() string {
 	return MethodTasksSendSubscribe
 }
 
@@ -183,7 +183,7 @@ type GetTaskRequest struct {
 var _ A2ARequest = (*GetTaskRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (GetTaskRequest) MethodName() string {
+func (*GetTaskRequest) MethodName() string {
 	return MethodTasksGet
 }
 
@@ -216,7 +216,7 @@ type CancelTaskRequest struct {
 var _ A2ARequest = (*CancelTaskRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (CancelTaskRequest) MethodName() string {
+func (*CancelTaskRequest) MethodName() string {
 	return MethodTasksCancel
 }
 
@@ -249,7 +249,7 @@ type SetTaskPushNotificationRequest struct {
 var _ A2ARequest = (*SetTaskPushNotificationRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (SetTaskPushNotificationRequest) MethodName() string {
+func (*SetTaskPushNotificationRequest) MethodName() string {
 	return MethodTasksPushNotificationSet
 }
 
@@ -282,7 +282,7 @@ type GetTaskPushNotificationRequest struct {
 var _ A2ARequest = (*GetTaskPushNotificationRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (GetTaskPushNotificationRequest) MethodName() string {
+func (*GetTaskPushNotificationRequest) MethodName() string {
 	return MethodTasksPushNotificationGet
 }
 
@@ -315,7 +315,7 @@ type TaskResubscriptionRequest struct {
 var _ A2ARequest = (*TaskResubscriptionRequest)(nil)
 
 // MethodName implements [A2ARequest].
-func (TaskResubscriptionRequest) MethodName() string {
+func (*TaskResubscriptionRequest) MethodName() string {
 	return MethodTasksResubscribe
 }
 
