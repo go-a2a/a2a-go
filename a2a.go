@@ -37,6 +37,16 @@ const (
 	TaskStateCanceled TaskState = "canceled"
 )
 
+// Role represents the possible roles in a message.
+type Role string
+
+const (
+	// RoleUser indicates the message is from the client.
+	RoleUser Role = "user"
+	// RoleAgent indicates the message is from the agent.
+	RoleAgent Role = "agent"
+)
+
 // PartType represents the possible types of message parts.
 type PartType string
 
