@@ -5,7 +5,7 @@ package a2a
 
 import (
 	"encoding/json"
-	"strconv"
+	"fmt"
 )
 
 // A2A RPC method names.
@@ -28,33 +28,82 @@ const (
 
 // ID represents the unique identifier for JSON-RPC messages.
 type ID struct {
-	any
+	name   string
+	number int32
 }
 
-func (id ID) String() string {
-	switch id := id.any.(type) {
+var (
+	_ fmt.Formatter    = (*ID)(nil)
+	_ json.Marshaler   = (*ID)(nil)
+	_ json.Unmarshaler = (*ID)(nil)
+)
+
+// NewID returns a new request ID.
+func NewID[T string | int32](v T) ID {
+	switch v := any(v).(type) {
 	case string:
-		return id
-	case float64:
-		return strconv.FormatFloat(id, 'f', 0, 64)
+		return ID{name: v}
+	case int32:
+		return ID{number: v}
 	default:
 		panic("unreachable")
 	}
+}
+
+// Format writes the ID to the formatter.
+//
+// If the rune is q the representation is non ambiguous,
+// string forms are quoted, number forms are preceded by a #.
+func (id ID) Format(f fmt.State, r rune) {
+	numF, strF := `%d`, `%s`
+	if r == 'q' {
+		numF, strF = `#%d`, `%q`
+	}
+
+	switch {
+	case id.name != "":
+		fmt.Fprintf(f, strF, id.name)
+	default:
+		fmt.Fprintf(f, numF, id.number)
+	}
+}
+
+// String returns the string representation of the ID.
+func (id ID) String() string {
+	return fmt.Sprint(id)
+}
+
+// MarshalJSON implements json.Marshaler.
+func (id *ID) MarshalJSON() ([]byte, error) {
+	if id.name != "" {
+		return json.Marshal(id.name)
+	}
+	return json.Marshal(id.number)
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (id *ID) UnmarshalJSON(data []byte) error {
+	*id = ID{}
+	if err := json.Unmarshal(data, &id.number); err == nil {
+		return nil
+	}
+	return json.Unmarshal(data, &id.name)
 }
 
 // JSONRPCMessage is the base structure for all JSON-RPC 2.0 messages.
 type JSONRPCMessage struct {
 	// JSONRPC version, always "2.0".
 	JSONRPC string `json:"jsonrpc"`
+
 	// ID is a unique identifier for the request/response correlation.
 	ID ID `json:"id,omitzero"` // string, number, or null
 }
 
 // NewJSONRPCMessage creates a new [JSONRPCMessage] with the given id.
-func NewJSONRPCMessage(id any) JSONRPCMessage {
+func NewJSONRPCMessage(id ID) JSONRPCMessage {
 	return JSONRPCMessage{
 		JSONRPC: "2.0",
-		ID:      ID{id},
+		ID:      id,
 	}
 }
 
@@ -64,6 +113,7 @@ type JSONRPCRequest struct {
 
 	// Method identifies the operation to perform.
 	Method string `json:"method"`
+
 	// Params contains parameters for the method.
 	Params json.RawMessage `json:"params,omitempty"`
 }
@@ -75,249 +125,10 @@ type JSONRPCResponse struct {
 	// Result contains the successful result data (can be null).
 	// Mutually exclusive with Error.
 	Result any `json:"result,omitempty"`
+
 	// Error contains an error object if the request failed.
 	// Mutually exclusive with Result.
 	Error *JSONRPCError `json:"error,omitempty"`
-}
-
-// A2ARequest represents a request to the A2A API.
-type A2ARequest interface {
-	MethodName() string
-}
-
-// SendTaskRequest represents a request to initiate or continue a task.
-type SendTaskRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/send".
-	Method string         `json:"method"`
-	Params TaskSendParams `json:"params"`
-}
-
-var _ A2ARequest = (*SendTaskRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*SendTaskRequest) MethodName() string {
-	return MethodTasksSend
-}
-
-// NewSendTaskRequest creates a new [SendTaskRequest].
-func NewSendTaskRequest(id any, params TaskSendParams) SendTaskRequest {
-	return SendTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksSend,
-		Params:         params,
-	}
-}
-
-// SendTaskResponse represents a response to a [SendTaskRequest].
-type SendTaskResponse struct {
-	JSONRPCResponse
-
-	// Result contains the task if successful.
-	Result *Task `json:"result,omitempty"`
-}
-
-// NewSendTaskResponse creates a new [SendTaskResponse].
-func NewSendTaskResponse(id any, result *Task) SendTaskResponse {
-	return SendTaskResponse{
-		JSONRPCResponse: JSONRPCResponse{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-		},
-		Result: result,
-	}
-}
-
-// SendTaskStreamingRequest represents a request to send a task and subscribe to updates.
-type SendTaskStreamingRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/sendSubscribe".
-	Method string         `json:"method"`
-	Params TaskSendParams `json:"params"`
-}
-
-var _ A2ARequest = (*SendTaskStreamingRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*SendTaskStreamingRequest) MethodName() string {
-	return MethodTasksSendSubscribe
-}
-
-// NewSendTaskStreamingRequest creates a new [SendTaskStreamingRequest].
-func NewSendTaskStreamingRequest(id any, params TaskSendParams) SendTaskStreamingRequest {
-	return SendTaskStreamingRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksSendSubscribe,
-		Params:         params,
-	}
-}
-
-// SendTaskStreamingResponse represents a streaming response event for a [SendTaskStreamingRequest].
-type SendTaskStreamingResponse struct {
-	JSONRPCResponse
-
-	// Result contains either a [TaskStatusUpdateEvent] or [TaskArtifactUpdateEvent].
-	Result TaskEvent `json:"result,omitempty"`
-	// Error contains error details if the request failed.
-	Error *JSONRPCError `json:"error,omitempty"`
-}
-
-// GetTaskRequest represents a request to retrieve the current state of a task.
-type GetTaskRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/get".
-	Method string          `json:"method"`
-	Params TaskQueryParams `json:"params"`
-}
-
-var _ A2ARequest = (*GetTaskRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*GetTaskRequest) MethodName() string {
-	return MethodTasksGet
-}
-
-// NewGetTaskRequest creates a new [GetTaskRequest].
-func NewGetTaskRequest(id any, params TaskQueryParams) GetTaskRequest {
-	return GetTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksGet,
-		Params:         params,
-	}
-}
-
-// GetTaskResponse represents a response to a GetTaskRequest.
-type GetTaskResponse struct {
-	JSONRPCResponse
-
-	// Result contains the task if successful.
-	Result *Task `json:"result,omitempty"`
-}
-
-// CancelTaskRequest represents a request to cancel a running task.
-type CancelTaskRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/cancel".
-	Method string       `json:"method"`
-	Params TaskIDParams `json:"params"`
-}
-
-var _ A2ARequest = (*CancelTaskRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*CancelTaskRequest) MethodName() string {
-	return MethodTasksCancel
-}
-
-// NewCancelTaskRequest creates a new [CancelTaskRequest].
-func NewCancelTaskRequest(id any, params TaskIDParams) CancelTaskRequest {
-	return CancelTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksCancel,
-		Params:         params,
-	}
-}
-
-// CancelTaskResponse represents a response to a CancelTaskRequest.
-type CancelTaskResponse struct {
-	JSONRPCResponse
-
-	// Result contains the updated task if successful.
-	Result *Task `json:"result,omitempty"`
-}
-
-// SetTaskPushNotificationRequest represents a request to set or update push notification configuration.
-type SetTaskPushNotificationRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/pushNotification/set".
-	Method string                     `json:"method"`
-	Params TaskPushNotificationConfig `json:"params"`
-}
-
-var _ A2ARequest = (*SetTaskPushNotificationRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*SetTaskPushNotificationRequest) MethodName() string {
-	return MethodTasksPushNotificationSet
-}
-
-// NewSetTaskPushNotificationRequest creates a new [SetTaskPushNotificationRequest].
-func NewSetTaskPushNotificationRequest(id any, params TaskPushNotificationConfig) SetTaskPushNotificationRequest {
-	return SetTaskPushNotificationRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksPushNotificationSet,
-		Params:         params,
-	}
-}
-
-// SetTaskPushNotificationResponse represents a response to a SetTaskPushNotificationRequest.
-type SetTaskPushNotificationResponse struct {
-	JSONRPCResponse
-
-	// Result contains the confirmed config if successful.
-	Result *TaskPushNotificationConfig `json:"result,omitempty"`
-}
-
-// GetTaskPushNotificationRequest represents a request to retrieve push notification configuration.
-type GetTaskPushNotificationRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/pushNotification/get".
-	Method string       `json:"method"`
-	Params TaskIDParams `json:"params"`
-}
-
-var _ A2ARequest = (*GetTaskPushNotificationRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*GetTaskPushNotificationRequest) MethodName() string {
-	return MethodTasksPushNotificationGet
-}
-
-// NewGetTaskPushNotificationRequest creates a new [GetTaskPushNotificationRequest].
-func NewGetTaskPushNotificationRequest(id any, params TaskIDParams) GetTaskPushNotificationRequest {
-	return GetTaskPushNotificationRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksPushNotificationGet,
-		Params:         params,
-	}
-}
-
-// GetTaskPushNotificationResponse represents a response to a [GetTaskPushNotificationRequest].
-type GetTaskPushNotificationResponse struct {
-	JSONRPCResponse
-
-	// Result contains the push notification config if successful.
-	Result *TaskPushNotificationConfig `json:"result,omitempty"`
-}
-
-// TaskResubscriptionRequest represents a request to resubscribe to task updates.
-type TaskResubscriptionRequest struct {
-	JSONRPCMessage
-
-	// Method is always "tasks/resubscribe".
-	Method string          `json:"method"`
-	Params TaskQueryParams `json:"params"`
-}
-
-var _ A2ARequest = (*TaskResubscriptionRequest)(nil)
-
-// MethodName implements [A2ARequest].
-func (*TaskResubscriptionRequest) MethodName() string {
-	return MethodTasksResubscribe
-}
-
-// NewTaskResubscriptionRequest creates a new [TaskResubscriptionRequest].
-func NewTaskResubscriptionRequest(id any, params TaskQueryParams) TaskResubscriptionRequest {
-	return TaskResubscriptionRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksResubscribe,
-		Params:         params,
-	}
 }
 
 // Standard JSON-RPC 2.0 error codes.
@@ -352,8 +163,10 @@ const (
 type JSONRPCError struct {
 	// Code is the error code.
 	Code int `json:"code"`
+
 	// Message is a short description of the error.
 	Message string `json:"message"`
+
 	// Data contains optional additional error details.
 	Data any `json:"data,omitempty"`
 }

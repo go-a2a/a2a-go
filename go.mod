@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/bytedance/sonic v1.13.2
+	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/trace v1.35.0
