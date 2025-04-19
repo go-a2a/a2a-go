@@ -75,7 +75,7 @@ type TextPart struct {
 var _ Part = (*TextPart)(nil)
 
 // Type implements [Part].
-func (TextPart) Type() PartType {
+func (*TextPart) Type() PartType {
 	return PartTypeText
 }
 
@@ -90,7 +90,7 @@ type FilePart struct {
 var _ Part = (*FilePart)(nil)
 
 // Type implements [Part].
-func (FilePart) Type() PartType {
+func (*FilePart) Type() PartType {
 	return PartTypeFile
 }
 
@@ -124,7 +124,7 @@ type DataPart struct {
 var _ Part = (*DataPart)(nil)
 
 // Type implements [Part].
-func (DataPart) Type() PartType {
+func (*DataPart) Type() PartType {
 	return PartTypeFile
 }
 
@@ -184,8 +184,8 @@ type Task struct {
 
 // TaskEvent represents an event related to a task.
 type TaskEvent interface {
-	// GetTaskID returns the task ID that this event is for.
-	GetTaskID() string
+	// TaskID returns the task ID that this event is for.
+	TaskID() string
 }
 
 // TaskStatusUpdateEvent signals a change in task status.
@@ -200,8 +200,8 @@ type TaskStatusUpdateEvent struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// GetTaskID implements [TaskEvent].
-func (e *TaskStatusUpdateEvent) GetTaskID() string {
+// TaskID implements [TaskEvent].
+func (e *TaskStatusUpdateEvent) TaskID() string {
 	return e.ID
 }
 
@@ -216,7 +216,7 @@ type TaskArtifactUpdateEvent struct {
 }
 
 // GetTaskID implements [TaskEvent].
-func (e *TaskArtifactUpdateEvent) GetTaskID() string {
+func (e *TaskArtifactUpdateEvent) TaskID() string {
 	return e.ID
 }
 
