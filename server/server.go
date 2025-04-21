@@ -58,9 +58,9 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	}
 
 	mux := http.NewServeMux()
-	// agent card endpoint - serves the agent's metadata
-	mux.HandleFunc("GET /.well-known/agent.json", s.handleAgentCardRequest)
-	// main A2A endpoint
+	// Handle well-known agent.json
+	mux.HandleFunc("GET /.well-known/agent.json", s.agentCardRequestHandler)
+	// Handle A2A API requests
 	mux.HandleFunc("POST "+s.endpoint, s.requestHandler)
 
 	s.server = &http.Server{
@@ -71,13 +71,13 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	return s
 }
 
-// ServeHTTP is the HTTP handler for the [Server].
+// ServeHTTP implements [http.Handler] for the server.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.server.Handler.ServeHTTP(w, r)
 }
 
-// Start starts the [Server].
-func (s *Server) Start(ctx context.Context) error {
+// ListenAndServe starts the [Server].
+func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.agentCard.Name == "" || s.agentCard.URL == "" || s.agentCard.Version == "" {
 		return errors.New("agent card must have name, URL, and version")
 	}
@@ -85,7 +85,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return errors.New("task manager cannot be nil")
 	}
 
-	s.logger.InfoContext(ctx, "starting A2A server", "address", s.server.Addr, "endpoint", s.endpoint)
+	s.logger.DebugContext(ctx, "starting A2A server", "address", s.server.Addr, "endpoint", s.endpoint)
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.logger.ErrorContext(ctx, "server error", slog.Any("error", err))
@@ -103,8 +103,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-// handleAgentCardRequest handles requests for the agent card.
-func (s *Server) handleAgentCardRequest(w http.ResponseWriter, r *http.Request) {
+// agentCardRequestHandler handles requests for the agent card.
+func (s *Server) agentCardRequestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -131,6 +131,8 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := s.tracer.Start(r.Context(), "server.requestHandler")
 	defer span.End()
 
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodPost {
 		span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.InvalidRequestErrorCode))
 
@@ -143,7 +145,7 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 		span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.JSONParseErrorCode))
 		span.SetStatus(codes.Error, err.Error())
 
-		s.writeError(ctx, w, a2a.JSONParseErrorCode, "Invalid JSON payload")
+		s.writeError(ctx, w, a2a.JSONParseErrorCode, "requestHandler: Invalid JSON payload")
 		return
 	}
 
@@ -155,60 +157,37 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Handle method
-	var (
-		result any
-		err    error
-	)
 	switch req.Method {
 	case a2a.MethodTasksSend:
-		result, err = s.handleSendTask(ctx, req.Params)
+		s.handleSendTask(w, r, req.Params)
 	case a2a.MethodTasksGet:
-		result, err = s.handleGetTask(ctx, req.Params)
+		s.handleGetTask(w, r, req.Params)
 	case a2a.MethodTasksCancel:
-		result, err = s.handleCancelTask(ctx, req.Params)
+		s.handleCancelTask(w, r, req.Params)
 	case a2a.MethodTasksPushNotificationSet:
-		result, err = s.handleSetTaskPushNotification(ctx, req.Params)
+		s.handleSetTaskPushNotification(w, r, req.Params)
 	case a2a.MethodTasksPushNotificationGet:
-		result, err = s.handleGetTaskPushNotification(ctx, req.Params)
+		s.handleGetTaskPushNotification(w, r, req.Params)
 	case a2a.MethodTasksSendSubscribe:
-		// TODO(zchee): handleSendTaskStreaming writes the response directly
-		_, err = s.handleSendTaskStreaming(ctx, w, req.ID, req.Params)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "handle SendTaskStreaming", slog.Any("error", err))
-			span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.InternalErrorCode))
-			span.SetStatus(codes.Error, err.Error())
-			s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: handle SendTaskStreaming")
-		}
-		return
+		s.handleSendTaskStreaming(w, r, req.ID, req.Params)
 	case a2a.MethodTasksResubscribe:
-		// TODO(zchee): handleTaskResubscription writes the response directly
-		_, err = s.handleTaskResubscription(ctx, w, req.ID, req.Params)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "handle TaskResubscription", slog.Any("error", err))
-			s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: handle TaskResubscription")
-		}
-		return
+		s.handleTaskResubscription(w, r, req.ID, req.Params)
 	default:
 		s.writeError(ctx, w, a2a.MethodNotFoundErrorCode, "Method not found")
-		return
 	}
+}
 
-	if err != nil {
-		s.logger.ErrorContext(ctx, "method execution failed", slog.String("method", req.Method), slog.Any("error", err))
-		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Sprintf("Internal error: %v", err))
-		return
-	}
-
+func (s *Server) writeResponse(ctx context.Context, w http.ResponseWriter, id a2a.ID, result any) {
 	// Write success response
 	resp := a2a.JSONRPCResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+		JSONRPCMessage: a2a.NewJSONRPCMessage(id),
 		Result:         result,
 	}
 
 	data, err := sonic.ConfigFastest.Marshal(&resp)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "marshal response", slog.Any("error", err))
-		s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: marshal response")
+		s.writeError(ctx, w, a2a.InternalErrorCode, "marshal response")
 		return
 	}
 
@@ -217,13 +196,15 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = w.Write(data)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "write response", slog.Any("error", err))
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("write response: %w", err).Error())
 	}
 }
 
 // writeError writes an error response in JSON-RPC format.
 func (s *Server) writeError(ctx context.Context, w http.ResponseWriter, code int, message string) {
 	span := trace.SpanFromContext(ctx)
-	_ = span
+	span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.InternalErrorCode))
+	span.SetStatus(codes.Error, message)
 
 	resp := &a2a.JSONRPCResponse{
 		JSONRPCMessage: a2a.JSONRPCMessage{
@@ -250,113 +231,124 @@ func (s *Server) writeError(ctx context.Context, w http.ResponseWriter, code int
 }
 
 // handleSendTask handles the tasks/send method.
-func (s *Server) handleSendTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleSendTask")
+func (s *Server) handleSendTask(w http.ResponseWriter, r *http.Request, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleSendTask")
 	defer span.End()
 
 	var req a2a.SendTaskRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	resp, err := s.taskManager.OnSendTask(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("process task: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("process task: %w", err).Error())
+		return
 	}
 
-	return resp.Result, nil
+	s.writeResponse(ctx, w, req.ID, resp.Result)
 }
 
 // handleGetTask handles the tasks/get method.
-func (s *Server) handleGetTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleGetTask")
+func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleGetTask")
 	defer span.End()
 
 	var req a2a.GetTaskRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	resp, err := s.taskManager.OnGetTask(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("get task: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("get task: %w", err).Error())
+		return
 	}
 
-	return resp.Result, nil
+	s.writeResponse(ctx, w, req.ID, resp.Result)
 }
 
 // handleCancelTask handles the tasks/cancel method.
-func (s *Server) handleCancelTask(ctx context.Context, params json.RawMessage) (*a2a.Task, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleCancelTask")
+func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleCancelTask")
 	defer span.End()
 
 	var req a2a.CancelTaskRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	resp, err := s.taskManager.OnCancelTask(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("cancel task: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("cancel task: %w", err).Error())
+		return
 	}
 
-	return resp.Result, nil
+	s.writeResponse(ctx, w, req.ID, resp.Result)
 }
 
 // handleSetTaskPushNotification handles the tasks/pushNotification/set method.
-func (s *Server) handleSetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleSetTaskPushNotification")
+func (s *Server) handleSetTaskPushNotification(w http.ResponseWriter, r *http.Request, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleSetTaskPushNotification")
 	defer span.End()
 
 	var req a2a.SetTaskPushNotificationRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	resp, err := s.taskManager.OnSetTaskPushNotification(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("set push notification: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("set push notification: %w", err).Error())
+		return
 	}
 
-	return resp.Result, nil
+	s.writeResponse(ctx, w, req.ID, resp.Result)
 }
 
 // handleGetTaskPushNotification handles the tasks/pushNotification/get method.
-func (s *Server) handleGetTaskPushNotification(ctx context.Context, params json.RawMessage) (*a2a.TaskPushNotificationConfig, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleGetTaskPushNotification")
+func (s *Server) handleGetTaskPushNotification(w http.ResponseWriter, r *http.Request, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleGetTaskPushNotification")
 	defer span.End()
 
 	var req a2a.GetTaskPushNotificationRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	resp, err := s.taskManager.OnGetTaskPushNotification(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("get push notification: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("get push notification: %w", err).Error())
+		return
 	}
 
-	return resp.Result, nil
+	s.writeResponse(ctx, w, req.ID, resp.Result)
 }
 
 // handleSendTaskStreaming handles the tasks/sendSubscribe method.
-func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id a2a.ID, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleSendTaskStreaming")
+func (s *Server) handleSendTaskStreaming(w http.ResponseWriter, r *http.Request, id a2a.ID, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleSendTaskStreaming")
 	defer span.End()
 
 	var req a2a.SendTaskStreamingRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
@@ -370,13 +362,15 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 	// Create a channel for the task events
 	eventsCh, err := s.taskManager.OnSendTaskSubscribe(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("subscribe to task: %w", err).Error())
+		return
 	}
 
 	// Flush the headers to the client
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		return nil, fmt.Errorf("streaming not supported by response writer")
+		s.writeError(ctx, w, a2a.InternalErrorCode, "streaming not supported by response writer")
+		return
 	}
 
 	// Begin streaming events
@@ -402,18 +396,17 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 
 		flusher.Flush()
 	}
-
-	return nil, nil
 }
 
 // handleTaskResubscription handles the tasks/resubscribe method.
-func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWriter, id a2a.ID, params json.RawMessage) (any, error) {
-	ctx, span := s.tracer.Start(ctx, "server.handleTaskResubscription")
+func (s *Server) handleTaskResubscription(w http.ResponseWriter, r *http.Request, id a2a.ID, params json.RawMessage) {
+	ctx, span := s.tracer.Start(r.Context(), "server.handleTaskResubscription")
 	defer span.End()
 
 	var req a2a.TaskResubscriptionRequest
 	if err := sonic.ConfigFastest.Unmarshal(params, &req); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("invalid params: %w", err).Error())
+		return
 	}
 
 	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
@@ -427,18 +420,20 @@ func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWr
 	// Create a channel for the task events
 	ch, err := s.taskManager.OnResubscribeToTask(ctx, &req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("subscribe to task: %w", err).Error())
+		return
 	}
 
 	// Flush the headers to the client
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		return nil, fmt.Errorf("streaming not supported by response writer")
+		s.writeError(ctx, w, a2a.InternalErrorCode, "streaming not supported by response writer")
+		return
 	}
 
 	events, ok := ch.(<-chan a2a.TaskEvent)
 	if !ok {
-		return nil, nil
+		return
 	}
 
 	// Begin streaming events
@@ -464,6 +459,4 @@ func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWr
 
 		flusher.Flush()
 	}
-
-	return nil, nil
 }
