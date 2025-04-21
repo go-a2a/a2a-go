@@ -29,10 +29,9 @@ const (
 
 // SendTaskRequest represents a request to initiate or continue a task.
 type SendTaskRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
 	// Method is always "tasks/send".
-	Method string         `json:"method"`
 	Params TaskSendParams `json:"params"`
 }
 
@@ -68,9 +67,11 @@ func (r *SendTaskRequest) UnmarshalJSON(data []byte) error {
 // NewSendTaskRequest creates a new [SendTaskRequest].
 func NewSendTaskRequest(id ID, params TaskSendParams) *SendTaskRequest {
 	return &SendTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksSend,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksSend,
+		},
+		Params: params,
 	}
 }
 
@@ -84,10 +85,8 @@ type SendTaskResponse struct {
 
 // GetTaskRequest represents a request to retrieve the current state of a task.
 type GetTaskRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/get".
-	Method string          `json:"method"`
 	Params TaskQueryParams `json:"params"`
 }
 
@@ -123,9 +122,11 @@ func (r *GetTaskRequest) UnmarshalJSON(data []byte) error {
 // NewGetTaskRequest creates a new [GetTaskRequest].
 func NewGetTaskRequest(id ID, params TaskQueryParams) GetTaskRequest {
 	return GetTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksGet,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksGet,
+		},
+		Params: params,
 	}
 }
 
@@ -139,10 +140,8 @@ type GetTaskResponse struct {
 
 // CancelTaskRequest represents a request to cancel a running task.
 type CancelTaskRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/cancel".
-	Method string       `json:"method"`
 	Params TaskIDParams `json:"params"`
 }
 
@@ -178,9 +177,11 @@ func (r *CancelTaskRequest) UnmarshalJSON(data []byte) error {
 // NewCancelTaskRequest creates a new [CancelTaskRequest].
 func NewCancelTaskRequest(id ID, params TaskIDParams) CancelTaskRequest {
 	return CancelTaskRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksCancel,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksCancel,
+		},
+		Params: params,
 	}
 }
 
@@ -194,10 +195,8 @@ type CancelTaskResponse struct {
 
 // SetTaskPushNotificationRequest represents a request to set or update push notification configuration.
 type SetTaskPushNotificationRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/pushNotification/set".
-	Method string                     `json:"method"`
 	Params TaskPushNotificationConfig `json:"params"`
 }
 
@@ -233,9 +232,11 @@ func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 // NewSetTaskPushNotificationRequest creates a new [SetTaskPushNotificationRequest].
 func NewSetTaskPushNotificationRequest(id ID, params TaskPushNotificationConfig) SetTaskPushNotificationRequest {
 	return SetTaskPushNotificationRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksPushNotificationSet,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksPushNotificationSet,
+		},
+		Params: params,
 	}
 }
 
@@ -249,10 +250,8 @@ type SetTaskPushNotificationResponse struct {
 
 // GetTaskPushNotificationRequest represents a request to retrieve push notification configuration.
 type GetTaskPushNotificationRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/pushNotification/get".
-	Method string       `json:"method"`
 	Params TaskIDParams `json:"params"`
 }
 
@@ -288,9 +287,11 @@ func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 // NewGetTaskPushNotificationRequest creates a new [GetTaskPushNotificationRequest].
 func NewGetTaskPushNotificationRequest(id ID, params TaskIDParams) GetTaskPushNotificationRequest {
 	return GetTaskPushNotificationRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksPushNotificationGet,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksPushNotificationGet,
+		},
+		Params: params,
 	}
 }
 
@@ -304,10 +305,8 @@ type GetTaskPushNotificationResponse struct {
 
 // SendTaskStreamingRequest represents a request to send a task and subscribe to updates.
 type SendTaskStreamingRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/sendSubscribe".
-	Method string         `json:"method"`
 	Params TaskSendParams `json:"params"`
 }
 
@@ -343,9 +342,11 @@ func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) error {
 // NewSendTaskStreamingRequest creates a new [SendTaskStreamingRequest].
 func NewSendTaskStreamingRequest(id ID, params TaskSendParams) SendTaskStreamingRequest {
 	return SendTaskStreamingRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksSendSubscribe,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksSendSubscribe,
+		},
+		Params: params,
 	}
 }
 
@@ -359,10 +360,8 @@ type SendTaskStreamingResponse struct {
 
 // TaskResubscriptionRequest represents a request to resubscribe to task updates.
 type TaskResubscriptionRequest struct {
-	JSONRPCMessage
+	JSONRPCRequest
 
-	// Method is always "tasks/resubscribe".
-	Method string       `json:"method"`
 	Params TaskIDParams `json:"params"`
 }
 
@@ -398,8 +397,10 @@ func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) error {
 // NewTaskResubscriptionRequest creates a new [TaskResubscriptionRequest].
 func NewTaskResubscriptionRequest(id ID, params TaskIDParams) TaskResubscriptionRequest {
 	return TaskResubscriptionRequest{
-		JSONRPCMessage: NewJSONRPCMessage(id),
-		Method:         MethodTasksResubscribe,
-		Params:         params,
+		JSONRPCRequest: JSONRPCRequest{
+			JSONRPCMessage: NewJSONRPCMessage(id),
+			Method:         MethodTasksResubscribe,
+		},
+		Params: params,
 	}
 }
