@@ -220,7 +220,7 @@ type Artifact struct {
 	Parts []Part `json:"parts"`
 
 	// Index is the order index, useful for streaming/updates.
-	Index int `json:"index,omitempty"`
+	Index int `json:"index,omitzero"`
 
 	// Append indicates if content should append to an artifact at the same index (for streaming).
 	Append bool `json:"append,omitzero"`
