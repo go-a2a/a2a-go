@@ -120,8 +120,8 @@ func (r *GetTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewGetTaskRequest creates a new [GetTaskRequest].
-func NewGetTaskRequest(id ID, params TaskQueryParams) GetTaskRequest {
-	return GetTaskRequest{
+func NewGetTaskRequest(id ID, params TaskQueryParams) *GetTaskRequest {
+	return &GetTaskRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksGet,
@@ -175,8 +175,8 @@ func (r *CancelTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewCancelTaskRequest creates a new [CancelTaskRequest].
-func NewCancelTaskRequest(id ID, params TaskIDParams) CancelTaskRequest {
-	return CancelTaskRequest{
+func NewCancelTaskRequest(id ID, params TaskIDParams) *CancelTaskRequest {
+	return &CancelTaskRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksCancel,
@@ -230,8 +230,8 @@ func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewSetTaskPushNotificationRequest creates a new [SetTaskPushNotificationRequest].
-func NewSetTaskPushNotificationRequest(id ID, params TaskPushNotificationConfig) SetTaskPushNotificationRequest {
-	return SetTaskPushNotificationRequest{
+func NewSetTaskPushNotificationRequest(id ID, params TaskPushNotificationConfig) *SetTaskPushNotificationRequest {
+	return &SetTaskPushNotificationRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksPushNotificationSet,
@@ -285,8 +285,8 @@ func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewGetTaskPushNotificationRequest creates a new [GetTaskPushNotificationRequest].
-func NewGetTaskPushNotificationRequest(id ID, params TaskIDParams) GetTaskPushNotificationRequest {
-	return GetTaskPushNotificationRequest{
+func NewGetTaskPushNotificationRequest(id ID, params TaskIDParams) *GetTaskPushNotificationRequest {
+	return &GetTaskPushNotificationRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksPushNotificationGet,
@@ -340,8 +340,8 @@ func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewSendTaskStreamingRequest creates a new [SendTaskStreamingRequest].
-func NewSendTaskStreamingRequest(id ID, params TaskSendParams) SendTaskStreamingRequest {
-	return SendTaskStreamingRequest{
+func NewSendTaskStreamingRequest(id ID, params TaskSendParams) *SendTaskStreamingRequest {
+	return &SendTaskStreamingRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksSendSubscribe,
@@ -395,8 +395,8 @@ func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewTaskResubscriptionRequest creates a new [TaskResubscriptionRequest].
-func NewTaskResubscriptionRequest(id ID, params TaskIDParams) TaskResubscriptionRequest {
-	return TaskResubscriptionRequest{
+func NewTaskResubscriptionRequest(id ID, params TaskIDParams) *TaskResubscriptionRequest {
+	return &TaskResubscriptionRequest{
 		JSONRPCRequest: JSONRPCRequest{
 			JSONRPCMessage: NewJSONRPCMessage(id),
 			Method:         MethodTasksResubscribe,
