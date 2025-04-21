@@ -132,6 +132,9 @@ func (c *Client) sendRequest(ctx context.Context, method, id string, payload any
 
 // handleRPCError processes any JSON-RPC error response and returns an appropriate error.
 func handleRPCError(jerr *a2a.JSONRPCError) error {
+	if jerr == nil {
+		return nil
+	}
 	return fmt.Errorf("RPC error: [%d] %s", jerr.Code, jerr.Message)
 }
 
@@ -149,6 +152,33 @@ func (c *Client) SendTask(ctx context.Context, req a2a.SendTaskRequest) (*a2a.Ta
 	}
 
 	var resp a2a.SendTaskResponse
+	if err := sonic.ConfigFastest.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if err := handleRPCError(resp.Error); err != nil {
+		return nil, err
+	}
+
+	return resp.Result, nil
+}
+
+// GetTask retrieves a task from an A2A server.
+func (c *Client) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
+	ctx, span := c.tracer.Start(ctx, "client.GetTask")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
+
+	params := map[string]string{
+		"id": req.Params.ID,
+	}
+	data, err := c.sendRequest(ctx, a2a.MethodTasksGet, req.Params.ID, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
+	var resp a2a.GetTaskResponse
 	if err := sonic.ConfigFastest.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -191,34 +221,6 @@ func (c *Client) SendTaskStreaming(ctx context.Context, req *a2a.SendTaskStreami
 	return events, nil
 }
 
-// GetTask retrieves a task from an A2A server.
-func (c *Client) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
-	ctx, span := c.tracer.Start(ctx, "client.GetTask")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
-
-	params := map[string]string{
-		"id": req.Params.ID,
-	}
-
-	data, err := c.sendRequest(ctx, a2a.MethodTasksGet, req.Params.ID, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task: %w", err)
-	}
-
-	var resp a2a.GetTaskResponse
-	if err := sonic.ConfigFastest.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if err := handleRPCError(resp.Error); err != nil {
-		return nil, err
-	}
-
-	return resp.Result, nil
-}
-
 // CancelTask cancels a task on an A2A server.
 func (c *Client) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
 	ctx, span := c.tracer.Start(ctx, "client.CancelTask")
@@ -229,7 +231,6 @@ func (c *Client) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a
 	params := map[string]string{
 		"id": req.Params.ID,
 	}
-
 	data, err := c.sendRequest(ctx, a2a.MethodTasksCancel, req.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)
@@ -258,7 +259,6 @@ func (c *Client) SetTaskPushNotification(ctx context.Context, req *a2a.SetTaskPu
 		ID:                     req.Params.ID,
 		PushNotificationConfig: req.Params.PushNotificationConfig,
 	}
-
 	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationSet, "", params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set task push notification: %w", err)
@@ -287,7 +287,6 @@ func (c *Client) GetTaskPushNotification(ctx context.Context, req *a2a.GetTaskPu
 		"id":       req.Params.ID,
 		"metadata": req.Params.Metadata,
 	}
-
 	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationGet, req.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task push notification: %w", err)
