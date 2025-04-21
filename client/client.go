@@ -46,7 +46,7 @@ type Client struct {
 }
 
 // NewClient creates a new [Client] with either a direct URL or [*a2a.AgentCard] option.
-func NewClient(url string, opts ...ClientOption) (*Client, error) {
+func NewClient(url string, opts ...Option) (*Client, error) {
 	c := &Client{
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
