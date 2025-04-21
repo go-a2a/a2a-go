@@ -6,6 +6,8 @@ package a2a
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/bytedance/sonic"
 )
 
 // A2A RPC method names.
@@ -76,18 +78,18 @@ func (id ID) String() string {
 // MarshalJSON implements json.Marshaler.
 func (id *ID) MarshalJSON() ([]byte, error) {
 	if id.name != "" {
-		return json.Marshal(id.name)
+		return sonic.ConfigFastest.Marshal(id.name)
 	}
-	return json.Marshal(id.number)
+	return sonic.ConfigFastest.Marshal(id.number)
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (id *ID) UnmarshalJSON(data []byte) error {
 	*id = ID{}
-	if err := json.Unmarshal(data, &id.number); err == nil {
+	if err := sonic.ConfigFastest.Unmarshal(data, &id.number); err == nil {
 		return nil
 	}
-	return json.Unmarshal(data, &id.name)
+	return sonic.ConfigFastest.Unmarshal(data, &id.name)
 }
 
 // JSONRPCMessage is the base structure for all JSON-RPC 2.0 messages.
