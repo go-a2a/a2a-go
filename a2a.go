@@ -5,15 +5,14 @@
 package a2a
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 )
-
-func init() {
-	uuid.EnableRandPool()
-}
 
 // Version is the current version of the A2A protocol.
 const Version = "0.1.0"
@@ -61,13 +60,17 @@ const (
 
 // Part is the interface for all part types.
 type Part interface {
-	Type() PartType
+	PartType() PartType
 }
 
 // TextPart represents a text message part.
 type TextPart struct {
 	// Text is the textual content.
+	Type PartType `json:"type"`
+
+	// Text is the textual content.
 	Text string `json:"text"`
+
 	// Metadata contains optional part-specific metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
@@ -75,14 +78,18 @@ type TextPart struct {
 var _ Part = (*TextPart)(nil)
 
 // Type implements [Part].
-func (*TextPart) Type() PartType {
+func (*TextPart) PartType() PartType {
 	return PartTypeText
 }
 
 // FilePart represents a file message part.
 type FilePart struct {
+	// Text is the textual content.
+	Type PartType `json:"type"`
+
 	// File contains the file content details.
 	File FileContent `json:"file"`
+
 	// Metadata contains optional part-specific metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
@@ -90,7 +97,7 @@ type FilePart struct {
 var _ Part = (*FilePart)(nil)
 
 // Type implements [Part].
-func (*FilePart) Type() PartType {
+func (*FilePart) PartType() PartType {
 	return PartTypeFile
 }
 
@@ -115,8 +122,12 @@ func (fc FileContent) CheckContent() error {
 
 // DataPart represents a structured data message part.
 type DataPart struct {
+	// Text is the textual content.
+	Type PartType `json:"type"`
+
 	// Data contains the structured JSON data.
 	Data map[string]any `json:"data"`
+
 	// Metadata contains optional part-specific metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
@@ -124,18 +135,62 @@ type DataPart struct {
 var _ Part = (*DataPart)(nil)
 
 // Type implements [Part].
-func (*DataPart) Type() PartType {
-	return PartTypeFile
+func (*DataPart) PartType() PartType {
+	return PartTypeData
 }
 
 // Message represents a communication unit between user and agent.
 type Message struct {
 	// Role is the sender role ("user" or "agent").
-	Role string `json:"role"`
+	Role Role `json:"role"`
+
 	// Parts contains the content parts (text, file, data).
 	Parts []Part `json:"parts"`
+
 	// Metadata contains optional message-specific metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// UnmarshalJSON implements [json.Unmarshaler].
+func (r *Message) UnmarshalJSON(data []byte) error {
+	type Alias Message
+	tmp := &struct {
+		*Alias
+		Parts []json.RawMessage `json:"parts"`
+	}{
+		Alias: (*Alias)(r),
+	}
+	if err := sonic.ConfigFastest.Unmarshal(data, tmp); err != nil {
+		return fmt.Errorf("Message: unmarshal data: %w", err)
+	}
+
+	r.Parts = make([]Part, len(tmp.Parts))
+	for i, part := range tmp.Parts {
+		// Try to unmarshal content as TextContent first
+		var textPart TextPart
+		if err := sonic.ConfigFastest.Unmarshal(part, &textPart); err == nil {
+			r.Parts[i] = &textPart
+			continue
+		}
+
+		// Try to unmarshal content as ImageContent
+		var filePart FilePart
+		if err := sonic.ConfigFastest.Unmarshal(part, &filePart); err == nil {
+			r.Parts[i] = &filePart
+			continue
+		}
+
+		// Try to unmarshal content as AudioContent
+		var dataPart DataPart
+		if err := sonic.ConfigFastest.Unmarshal(part, &dataPart); err == nil {
+			r.Parts[i] = &dataPart
+			continue
+		}
+
+		return fmt.Errorf("unknown part type at index: %d", i)
+	}
+
+	return nil
 }
 
 // TaskStatus represents the current status of a task.
