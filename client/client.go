@@ -80,7 +80,7 @@ func (c *Client) sendRequest(ctx context.Context, method, id string, payload any
 	defer span.End()
 
 	request := &a2a.JSONRPCRequest{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(id),
+		JSONRPCMessage: a2a.NewJSONRPCMessage(a2a.NewID(id)),
 		Method:         method,
 	}
 
@@ -217,7 +217,7 @@ func (c *Client) GetTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, er
 		"id": getReq.Params.ID,
 	}
 
-	data, err := c.sendRequest(ctx, getReq.Params.ID, a2a.MethodTasksGet, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksGet, getReq.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
@@ -250,7 +250,7 @@ func (c *Client) CancelTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task,
 		"id": cancelReq.Params.ID,
 	}
 
-	data, err := c.sendRequest(ctx, cancelReq.Params.ID, a2a.MethodTasksCancel, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksCancel, cancelReq.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)
 	}
@@ -284,7 +284,7 @@ func (c *Client) SetTaskPushNotification(ctx context.Context, req a2a.A2ARequest
 		PushNotificationConfig: pushReq.Params.PushNotificationConfig,
 	}
 
-	data, err := c.sendRequest(ctx, "", a2a.MethodTasksPushNotificationSet, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationSet, "", params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set task push notification: %w", err)
 	}
@@ -318,7 +318,7 @@ func (c *Client) GetTaskPushNotification(ctx context.Context, req a2a.A2ARequest
 		"metadata": getPushReq.Params.Metadata,
 	}
 
-	data, err := c.sendRequest(ctx, getPushReq.Params.ID, a2a.MethodTasksPushNotificationGet, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationGet, getPushReq.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task push notification: %w", err)
 	}
