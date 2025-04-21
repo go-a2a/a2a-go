@@ -42,7 +42,7 @@ func (r *SendTaskRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = (m["method"].(string))
+	r.Method = MethodTasksSend
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -97,7 +97,7 @@ func (r *GetTaskRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksGet
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -152,7 +152,7 @@ func (r *CancelTaskRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksCancel
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -207,7 +207,7 @@ func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksPushNotificationSet
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -262,7 +262,7 @@ func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksPushNotificationGet
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -317,7 +317,7 @@ func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksSendSubscribe
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
@@ -372,7 +372,7 @@ func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
-	r.Method = m["method"].(string)
+	r.Method = MethodTasksResubscribe
 	r.JSONRPCMessage = JSONRPCMessage{
 		JSONRPC: "2.0",
 	}
