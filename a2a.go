@@ -65,7 +65,7 @@ type Part interface {
 
 // TextPart represents a text message part.
 type TextPart struct {
-	// Text is the textual content.
+	// Type is the part type.
 	Type PartType `json:"type"`
 
 	// Text is the textual content.
@@ -84,7 +84,7 @@ func (*TextPart) PartType() PartType {
 
 // FilePart represents a file message part.
 type FilePart struct {
-	// Text is the textual content.
+	// Type is the part type.
 	Type PartType `json:"type"`
 
 	// File contains the file content details.
@@ -122,7 +122,7 @@ func (fc FileContent) CheckContent() error {
 
 // DataPart represents a structured data message part.
 type DataPart struct {
-	// Text is the textual content.
+	// Type is the part type.
 	Type PartType `json:"type"`
 
 	// Data contains the structured JSON data.
