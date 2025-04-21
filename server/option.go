@@ -9,25 +9,25 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ServerOption represents an option for configuring the [Server].
-type ServerOption func(*Server)
+// Option represents an option for configuring the [Server].
+type Option func(*Server)
 
 // WithEndpoint sets the custom endpoint for the [Server].
-func WithEndpoint(endpoint string) ServerOption {
+func WithEndpoint(endpoint string) Option {
 	return func(s *Server) {
 		s.endpoint = endpoint
 	}
 }
 
 // WithLogger sets the [*slog.Logger] for the [Server].
-func WithLogger(logger *slog.Logger) ServerOption {
+func WithLogger(logger *slog.Logger) Option {
 	return func(s *Server) {
 		s.logger = logger
 	}
 }
 
 // WithTracer sets the [trace.Tracer] for the [Server].
-func WithTracer(tracer trace.Tracer) ServerOption {
+func WithTracer(tracer trace.Tracer) Option {
 	return func(s *Server) {
 		s.tracer = tracer
 	}

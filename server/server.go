@@ -45,7 +45,7 @@ type Server struct {
 }
 
 // NewServer creates a new [Server].
-func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskManager, opts ...ServerOption) *Server {
+func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskManager, opts ...Option) *Server {
 	s := &Server{
 		endpoint:    "/",
 		agentCard:   agentCard,
