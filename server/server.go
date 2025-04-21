@@ -71,6 +71,11 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	return s
 }
 
+// ServeHTTP is the HTTP handler for the [Server].
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.server.Handler.ServeHTTP(w, r)
+}
+
 // Start starts the [Server].
 func (s *Server) Start(ctx context.Context) error {
 	if s.agentCard.Name == "" || s.agentCard.URL == "" || s.agentCard.Version == "" {
