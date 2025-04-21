@@ -16,6 +16,8 @@ import (
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/go-a2a/a2a"
@@ -125,17 +127,24 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 
 	if r.Method != http.MethodPost {
-		s.writeError(w, a2a.InvalidRequestErrorCode, "method not allowed")
+		span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.InvalidRequestErrorCode))
+
+		s.writeError(ctx, w, a2a.InvalidRequestErrorCode, "method not allowed")
 		return
 	}
 
 	var req a2a.JSONRPCRequest
 	if err := sonic.ConfigFastest.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, a2a.JSONParseErrorCode, "Invalid JSON payload")
+		span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.JSONParseErrorCode))
+		span.SetStatus(codes.Error, err.Error())
+
+		s.writeError(ctx, w, a2a.JSONParseErrorCode, "Invalid JSON payload")
 		return
 	}
 
 	span.SetAttributes(
+		semconv.RPCJsonrpcVersion(req.JSONRPC),
+		semconv.RPCJsonrpcRequestID(req.ID.String()),
 		attribute.Stringer("a2a.request_id", req.ID),
 		attribute.String("a2a.method", req.Method),
 	)
@@ -158,28 +167,30 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 		result, err = s.handleGetTaskPushNotification(ctx, req.Params)
 	case a2a.MethodTasksSendSubscribe:
 		// TODO(zchee): handleSendTaskStreaming writes the response directly
-		_, err = s.handleSendTaskStreaming(ctx, w, req.ID.String(), req.Params)
+		_, err = s.handleSendTaskStreaming(ctx, w, req.ID, req.Params)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "handle SendTaskStreaming", slog.Any("error", err))
-			s.writeError(w, a2a.InternalErrorCode, "Internal error: handle SendTaskStreaming")
+			span.SetAttributes(semconv.RPCJsonrpcErrorCode(a2a.InternalErrorCode))
+			span.SetStatus(codes.Error, err.Error())
+			s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: handle SendTaskStreaming")
 		}
 		return
 	case a2a.MethodTasksResubscribe:
 		// TODO(zchee): handleTaskResubscription writes the response directly
-		_, err = s.handleTaskResubscription(ctx, w, req.ID.String(), req.Params)
+		_, err = s.handleTaskResubscription(ctx, w, req.ID, req.Params)
 		if err != nil {
 			s.logger.ErrorContext(ctx, "handle TaskResubscription", slog.Any("error", err))
-			s.writeError(w, a2a.InternalErrorCode, "Internal error: handle TaskResubscription")
+			s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: handle TaskResubscription")
 		}
 		return
 	default:
-		s.writeError(w, a2a.MethodNotFoundErrorCode, "Method not found")
+		s.writeError(ctx, w, a2a.MethodNotFoundErrorCode, "Method not found")
 		return
 	}
 
 	if err != nil {
 		s.logger.ErrorContext(ctx, "method execution failed", slog.String("method", req.Method), slog.Any("error", err))
-		s.writeError(w, a2a.InternalErrorCode, fmt.Sprintf("Internal error: %v", err))
+		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Sprintf("Internal error: %v", err))
 		return
 	}
 
@@ -192,7 +203,7 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	data, err := sonic.ConfigFastest.Marshal(&resp)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "marshal response", slog.Any("error", err))
-		s.writeError(w, a2a.InternalErrorCode, "Internal error: marshal response")
+		s.writeError(ctx, w, a2a.InternalErrorCode, "Internal error: marshal response")
 		return
 	}
 
@@ -205,7 +216,10 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeError writes an error response in JSON-RPC format.
-func (s *Server) writeError(w http.ResponseWriter, code int, message string) {
+func (s *Server) writeError(ctx context.Context, w http.ResponseWriter, code int, message string) {
+	span := trace.SpanFromContext(ctx)
+	_ = span
+
 	resp := &a2a.JSONRPCResponse{
 		JSONRPCMessage: a2a.JSONRPCMessage{
 			JSONRPC: "2.0",
@@ -331,7 +345,7 @@ func (s *Server) handleGetTaskPushNotification(ctx context.Context, params json.
 }
 
 // handleSendTaskStreaming handles the tasks/sendSubscribe method.
-func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
+func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWriter, id a2a.ID, params json.RawMessage) (*a2a.TaskStatusUpdateEvent, error) {
 	ctx, span := s.tracer.Start(ctx, "server.handleSendTaskStreaming")
 	defer span.End()
 
@@ -349,7 +363,7 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 	w.WriteHeader(http.StatusOK)
 
 	// Create a channel for the task events
-	eventCh, err := s.taskManager.OnSendTaskSubscribe(ctx, &req)
+	eventsCh, err := s.taskManager.OnSendTaskSubscribe(ctx, &req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
 	}
@@ -361,7 +375,7 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 	}
 
 	// Begin streaming events
-	for event := range eventCh {
+	for event := range eventsCh {
 		// Marshal event to JSON
 		resp := &a2a.JSONRPCResponse{
 			JSONRPCMessage: a2a.NewJSONRPCMessage(id),
@@ -388,7 +402,7 @@ func (s *Server) handleSendTaskStreaming(ctx context.Context, w http.ResponseWri
 }
 
 // handleTaskResubscription handles the tasks/resubscribe method.
-func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWriter, id string, params json.RawMessage) (any, error) {
+func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWriter, id a2a.ID, params json.RawMessage) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "server.handleTaskResubscription")
 	defer span.End()
 
@@ -406,7 +420,7 @@ func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWr
 	w.WriteHeader(http.StatusOK)
 
 	// Create a channel for the task events
-	eventCh, err := s.taskManager.OnResubscribeToTask(ctx, &req)
+	ch, err := s.taskManager.OnResubscribeToTask(ctx, &req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to task: %w", err)
 	}
@@ -417,13 +431,13 @@ func (s *Server) handleTaskResubscription(ctx context.Context, w http.ResponseWr
 		return nil, fmt.Errorf("streaming not supported by response writer")
 	}
 
-	ch, ok := eventCh.(<-chan a2a.TaskEvent)
+	events, ok := ch.(<-chan a2a.TaskEvent)
 	if !ok {
 		return nil, nil
 	}
 
 	// Begin streaming events
-	for event := range ch {
+	for event := range events {
 		// Marshal event to JSON
 		resp := &a2a.JSONRPCResponse{
 			JSONRPCMessage: a2a.NewJSONRPCMessage(id),
