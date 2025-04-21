@@ -328,15 +328,20 @@ type TaskIDParams struct {
 
 // TaskQueryParams represents parameters for querying a task.
 type TaskQueryParams struct {
-	TaskIDParams
+	// ID is the unique task identifier.
+	ID string `json:"id"`
 
 	// HistoryLength optionally limits the number of historical messages to include.
 	HistoryLength int `json:"historyLength,omitzero"`
+
+	// Metadata contains optional additional metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // TaskSendParams represents parameters for sending a task.
 type TaskSendParams struct {
-	TaskIDParams
+	// ID is the unique task identifier.
+	ID string `json:"id"`
 
 	// SessionID optionally groups related tasks.
 	SessionID uuid.UUID `json:"sessionId,omitzero"`
@@ -352,6 +357,9 @@ type TaskSendParams struct {
 
 	// HistoryLength optionally limits the number of historical messages to include.
 	HistoryLength int `json:"historyLength,omitzero"`
+
+	// Metadata contains optional additional metadata.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // TaskPushNotificationConfig associates a PushNotificationConfig with a task ID.
