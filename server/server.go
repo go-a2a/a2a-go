@@ -179,12 +179,12 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeResponse(ctx context.Context, w http.ResponseWriter, id a2a.ID, result any) {
 	// Write success response
-	resp := a2a.JSONRPCResponse{
+	resp := &a2a.JSONRPCResponse{
 		JSONRPCMessage: a2a.NewJSONRPCMessage(id),
 		Result:         result,
 	}
 
-	data, err := sonic.ConfigFastest.Marshal(&resp)
+	data, err := sonic.ConfigFastest.Marshal(resp)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "marshal response", slog.Any("error", err))
 		s.writeError(ctx, w, a2a.InternalErrorCode, "marshal response")
