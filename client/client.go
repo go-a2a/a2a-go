@@ -136,19 +136,14 @@ func handleRPCError(jerr *a2a.JSONRPCError) error {
 }
 
 // SendTask sends a task to an A2A server.
-func (c *Client) SendTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, error) {
+func (c *Client) SendTask(ctx context.Context, req a2a.SendTaskRequest) (*a2a.Task, error) {
 	ctx, span := c.tracer.Start(ctx, "client.SendTask")
 	defer span.End()
 
-	sendReq, ok := req.(*a2a.SendTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SendTaskRequest but got %T", req)
-	}
-
-	taskID := sendReq.Params.ID
+	taskID := req.Params.ID
 	span.SetAttributes(attribute.String("a2a.task_id", taskID))
 
-	data, err := c.sendRequest(ctx, a2a.MethodTasksSend, taskID, sendReq.Params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksSend, taskID, req.Params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send task: %w", err)
 	}
@@ -167,16 +162,11 @@ func (c *Client) SendTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, e
 
 // SendTaskStreaming sends a task and subscribes to streaming updates.
 // It returns a channel that will receive task events as they occur.
-func (c *Client) SendTaskStreaming(ctx context.Context, req a2a.A2ARequest) (<-chan a2a.TaskEvent, error) {
+func (c *Client) SendTaskStreaming(ctx context.Context, req *a2a.SendTaskStreamingRequest) (<-chan a2a.TaskEvent, error) {
 	ctx, span := c.tracer.Start(ctx, "client.SendTaskStreaming")
 	defer span.End()
 
-	streamReq, ok := req.(*a2a.SendTaskStreamingRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SendTaskStreamingRequest but got %T", req)
-	}
-
-	taskID := streamReq.Params.ID
+	taskID := req.Params.ID
 	span.SetAttributes(attribute.String("a2a.task_id", taskID))
 
 	// Create the events channel with reasonable buffer size
@@ -202,22 +192,17 @@ func (c *Client) SendTaskStreaming(ctx context.Context, req a2a.A2ARequest) (<-c
 }
 
 // GetTask retrieves a task from an A2A server.
-func (c *Client) GetTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, error) {
+func (c *Client) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
 	ctx, span := c.tracer.Start(ctx, "client.GetTask")
 	defer span.End()
 
-	getReq, ok := req.(*a2a.GetTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", getReq.Params.ID))
+	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	params := map[string]string{
-		"id": getReq.Params.ID,
+		"id": req.Params.ID,
 	}
 
-	data, err := c.sendRequest(ctx, a2a.MethodTasksGet, getReq.Params.ID, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksGet, req.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
@@ -235,22 +220,17 @@ func (c *Client) GetTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, er
 }
 
 // CancelTask cancels a task on an A2A server.
-func (c *Client) CancelTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task, error) {
+func (c *Client) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
 	ctx, span := c.tracer.Start(ctx, "client.CancelTask")
 	defer span.End()
 
-	cancelReq, ok := req.(*a2a.CancelTaskRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected CancelTaskRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", cancelReq.Params.ID))
+	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	params := map[string]string{
-		"id": cancelReq.Params.ID,
+		"id": req.Params.ID,
 	}
 
-	data, err := c.sendRequest(ctx, a2a.MethodTasksCancel, cancelReq.Params.ID, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksCancel, req.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)
 	}
@@ -268,20 +248,15 @@ func (c *Client) CancelTask(ctx context.Context, req a2a.A2ARequest) (*a2a.Task,
 }
 
 // SetTaskPushNotification configures push notification for a task.
-func (c *Client) SetTaskPushNotification(ctx context.Context, req a2a.A2ARequest) (*a2a.TaskPushNotificationConfig, error) {
+func (c *Client) SetTaskPushNotification(ctx context.Context, req *a2a.SetTaskPushNotificationRequest) (*a2a.TaskPushNotificationConfig, error) {
 	ctx, span := c.tracer.Start(ctx, "client.SetTaskPushNotification")
 	defer span.End()
 
-	pushReq, ok := req.(*a2a.SetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected SetTaskPushNotificationRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", pushReq.Params.ID))
+	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	params := a2a.TaskPushNotificationConfig{
-		ID:                     pushReq.Params.ID,
-		PushNotificationConfig: pushReq.Params.PushNotificationConfig,
+		ID:                     req.Params.ID,
+		PushNotificationConfig: req.Params.PushNotificationConfig,
 	}
 
 	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationSet, "", params)
@@ -302,23 +277,18 @@ func (c *Client) SetTaskPushNotification(ctx context.Context, req a2a.A2ARequest
 }
 
 // GetTaskPushNotification retrieves push notification configuration for a task.
-func (c *Client) GetTaskPushNotification(ctx context.Context, req a2a.A2ARequest) (*a2a.TaskPushNotificationConfig, error) {
+func (c *Client) GetTaskPushNotification(ctx context.Context, req *a2a.GetTaskPushNotificationRequest) (*a2a.TaskPushNotificationConfig, error) {
 	ctx, span := c.tracer.Start(ctx, "client.GetTaskPushNotification")
 	defer span.End()
 
-	getPushReq, ok := req.(*a2a.GetTaskPushNotificationRequest)
-	if !ok {
-		return nil, fmt.Errorf("expected GetTaskPushNotificationRequest but got %T", req)
-	}
-
-	span.SetAttributes(attribute.String("a2a.task_id", getPushReq.Params.ID))
+	span.SetAttributes(attribute.String("a2a.task_id", req.Params.ID))
 
 	params := map[string]any{
-		"id":       getPushReq.Params.ID,
-		"metadata": getPushReq.Params.Metadata,
+		"id":       req.Params.ID,
+		"metadata": req.Params.Metadata,
 	}
 
-	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationGet, getPushReq.Params.ID, params)
+	data, err := c.sendRequest(ctx, a2a.MethodTasksPushNotificationGet, req.Params.ID, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task push notification: %w", err)
 	}

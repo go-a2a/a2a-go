@@ -3,11 +3,6 @@
 
 package a2a
 
-// A2ARequest represents a request to the A2A API.
-type A2ARequest interface {
-	MethodName() string
-}
-
 // SendTaskRequest represents a request to initiate or continue a task.
 type SendTaskRequest struct {
 	JSONRPCMessage
@@ -16,8 +11,6 @@ type SendTaskRequest struct {
 	Method string         `json:"method"`
 	Params TaskSendParams `json:"params"`
 }
-
-var _ A2ARequest = (*SendTaskRequest)(nil)
 
 // MethodName implements [A2ARequest].
 func (*SendTaskRequest) MethodName() string {
@@ -60,8 +53,6 @@ type SendTaskStreamingRequest struct {
 	Params TaskSendParams `json:"params"`
 }
 
-var _ A2ARequest = (*SendTaskStreamingRequest)(nil)
-
 // MethodName implements [A2ARequest].
 func (*SendTaskStreamingRequest) MethodName() string {
 	return MethodTasksSendSubscribe
@@ -95,8 +86,6 @@ type GetTaskRequest struct {
 	Params TaskQueryParams `json:"params"`
 }
 
-var _ A2ARequest = (*GetTaskRequest)(nil)
-
 // MethodName implements [A2ARequest].
 func (*GetTaskRequest) MethodName() string {
 	return MethodTasksGet
@@ -127,8 +116,6 @@ type CancelTaskRequest struct {
 	Method string       `json:"method"`
 	Params TaskIDParams `json:"params"`
 }
-
-var _ A2ARequest = (*CancelTaskRequest)(nil)
 
 // MethodName implements [A2ARequest].
 func (*CancelTaskRequest) MethodName() string {
@@ -161,8 +148,6 @@ type SetTaskPushNotificationRequest struct {
 	Params TaskPushNotificationConfig `json:"params"`
 }
 
-var _ A2ARequest = (*SetTaskPushNotificationRequest)(nil)
-
 // MethodName implements [A2ARequest].
 func (*SetTaskPushNotificationRequest) MethodName() string {
 	return MethodTasksPushNotificationSet
@@ -194,8 +179,6 @@ type GetTaskPushNotificationRequest struct {
 	Params TaskIDParams `json:"params"`
 }
 
-var _ A2ARequest = (*GetTaskPushNotificationRequest)(nil)
-
 // MethodName implements [A2ARequest].
 func (*GetTaskPushNotificationRequest) MethodName() string {
 	return MethodTasksPushNotificationGet
@@ -226,8 +209,6 @@ type TaskResubscriptionRequest struct {
 	Method string       `json:"method"`
 	Params TaskIDParams `json:"params"`
 }
-
-var _ A2ARequest = (*TaskResubscriptionRequest)(nil)
 
 // MethodName implements [A2ARequest].
 func (*TaskResubscriptionRequest) MethodName() string {
