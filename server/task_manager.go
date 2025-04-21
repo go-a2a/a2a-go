@@ -20,14 +20,14 @@ import (
 
 // TaskManager is the interface that task managers must implement.
 type TaskManager interface {
+	// OnSendTask handles a new task.
+	OnSendTask(ctx context.Context, req *a2a.SendTaskRequest) (*a2a.SendTaskResponse, error)
+
 	// OnGetTask retrieves a task.
 	OnGetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.GetTaskResponse, error)
 
 	// OnCancelTask cancels a task.
 	OnCancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.CancelTaskResponse, error)
-
-	// OnSendTask handles a new task.
-	OnSendTask(ctx context.Context, req *a2a.SendTaskRequest) (*a2a.SendTaskResponse, error)
 
 	// OnSendTaskSubscribe starts a streaming task and returns a channel for updates.
 	OnSendTaskSubscribe(ctx context.Context, req *a2a.SendTaskStreamingRequest) (<-chan *a2a.SendTaskStreamingResponse, error)
@@ -94,6 +94,12 @@ func (tm *InMemoryTaskManager) WithLogger(logger *slog.Logger) *InMemoryTaskMana
 func (tm *InMemoryTaskManager) WithTracer(tracer trace.Tracer) *InMemoryTaskManager {
 	tm.tracer = tracer
 	return tm
+}
+
+// OnSendTask handles a new task.
+func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, req *a2a.SendTaskRequest) (*a2a.SendTaskResponse, error) {
+	// no-op
+	return &a2a.SendTaskResponse{}, nil
 }
 
 // OnGetTask retrieves a task.
@@ -175,12 +181,6 @@ func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, req *a2a.Cancel
 		},
 		Result: task,
 	}, nil
-}
-
-// OnSendTask handles a new task.
-func (tm *InMemoryTaskManager) OnSendTask(ctx context.Context, req *a2a.SendTaskRequest) (*a2a.SendTaskResponse, error) {
-	// no-op
-	return &a2a.SendTaskResponse{}, nil
 }
 
 // OnSendTaskSubscribe starts a streaming task and returns a channel for updates.
