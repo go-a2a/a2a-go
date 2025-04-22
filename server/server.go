@@ -28,6 +28,9 @@ import (
 )
 
 const (
+	// RootPath is the root path for the A2A server.
+	RootPath = "/"
+
 	// AgantPath is the path to the agent card.
 	AgantPath = "/.well-known/agent.json"
 )
@@ -59,7 +62,7 @@ type Server struct {
 // NewServer creates a new [Server].
 func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskManager, opts ...Option) *Server {
 	s := &Server{
-		endpoint:    "/",
+		endpoint:    RootPath,
 		agentCard:   agentCard,
 		taskManager: taskManager,
 		logger:      slog.Default(),
@@ -101,7 +104,12 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	return s
 }
 
-// ListenAndServe starts the [Server].
+// ServeHTTP implements the [http.Handler] interface for the [Server].
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.server.Handler.ServeHTTP(w, r)
+}
+
+// ListenAndServe starts the server and listens for incoming requests.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.agentCard.Name == "" || s.agentCard.URL == "" || s.agentCard.Version == "" {
 		return errors.New("agent card must have name, URL, and version")
@@ -120,7 +128,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown shutdowns the [Server].
+// Shutdown shutdowns the server gracefully.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.server == nil {
 		return nil
@@ -408,14 +416,14 @@ func (s *Server) handleSendTaskStreaming(w http.ResponseWriter, r *http.Request,
 
 		data, err := sonic.ConfigFastest.Marshal(resp)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to marshal event", "error", err)
+			s.logger.ErrorContext(ctx, "marshal event", slog.Any("error", err))
 			continue
 		}
 
 		// Write event to the client
 		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to write event", "error", err)
+			s.logger.ErrorContext(ctx, "write event", slog.Any("error", err))
 			break
 		}
 
@@ -471,14 +479,14 @@ func (s *Server) handleTaskResubscription(w http.ResponseWriter, r *http.Request
 
 		data, err := sonic.ConfigFastest.Marshal(resp)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to marshal event", "error", err)
+			s.logger.ErrorContext(ctx, "marshal event", slog.Any("error", err))
 			continue
 		}
 
 		// Write event to the client
 		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to write event", "error", err)
+			s.logger.ErrorContext(ctx, "write event", slog.Any("error", err))
 			break
 		}
 
