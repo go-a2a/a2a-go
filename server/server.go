@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -20,6 +21,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 
 	"github.com/go-a2a/a2a"
 )
@@ -84,8 +87,15 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	}
 
 	s.server = &http.Server{
-		Addr:    net.JoinHostPort(host, port),
-		Handler: h,
+		Addr: net.JoinHostPort(host, port),
+		Handler: h2c.NewHandler(
+			h,
+			&http2.Server{},
+		),
+		ReadHeaderTimeout: time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+		MaxHeaderBytes:    8 * 1024, // 8KiB
 	}
 
 	return s
@@ -102,7 +112,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	s.logger.DebugContext(ctx, "starting A2A server", "address", s.server.Addr, "endpoint", s.endpoint)
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.ErrorContext(ctx, "server error", slog.Any("error", err))
 		}
 	}()
