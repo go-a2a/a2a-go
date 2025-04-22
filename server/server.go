@@ -23,10 +23,18 @@ import (
 	"github.com/go-a2a/a2a"
 )
 
+const (
+	// AgantPath is the path to the agent card.
+	AgantPath = "/.well-known/agent.json"
+)
+
 // Server represents an A2A server that handles incoming requests and manages tasks.
 type Server struct {
 	// server is the HTTP server.
 	server *http.Server
+
+	// handlers is a list of middleware handlers to apply to the server.
+	handlers []func(http.Handler) http.Handler
 
 	// endpoint is the endpoint to expose the API on.
 	endpoint string
@@ -59,21 +67,24 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 
 	mux := http.NewServeMux()
 	// Handle well-known agent.json
-	mux.HandleFunc("GET /.well-known/agent.json", s.agentCardRequestHandler)
+	mux.HandleFunc("GET "+AgantPath, s.agentCardRequestHandler)
 	// Handle A2A API requests
 	mux.HandleFunc("POST "+s.endpoint, s.requestHandler)
 
+	h := http.Handler(mux)
+	if len(s.handlers) > 0 {
+		h = s.handlers[len(s.handlers)-1](h)
+		for i := len(s.handlers) - 2; i >= 0; i-- {
+			h = s.handlers[i](h)
+		}
+	}
+
 	s.server = &http.Server{
 		Addr:    net.JoinHostPort(host, port),
-		Handler: mux,
+		Handler: h,
 	}
 
 	return s
-}
-
-// ServeHTTP implements [http.Handler] for the server.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.server.Handler.ServeHTTP(w, r)
 }
 
 // ListenAndServe starts the [Server].

@@ -5,6 +5,7 @@ package server
 
 import (
 	"log/slog"
+	"net/http"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -16,6 +17,13 @@ type Option func(*Server)
 func WithEndpoint(endpoint string) Option {
 	return func(s *Server) {
 		s.endpoint = endpoint
+	}
+}
+
+// WithHandlers sets the custom handlers for the [Server].
+func WithHandlers(handlers ...func(http.Handler) http.Handler) Option {
+	return func(s *Server) {
+		s.handlers = handlers
 	}
 }
 
