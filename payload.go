@@ -13,16 +13,22 @@ import (
 const (
 	// MethodTasksSend is the method name for sending a task.
 	MethodTasksSend = "tasks/send"
+
 	// MethodTasksGet is the method name for getting a task.
 	MethodTasksGet = "tasks/get"
+
 	// MethodTasksCancel is the method name for canceling a task.
 	MethodTasksCancel = "tasks/cancel"
+
 	// MethodTasksPushNotificationSet is the method name for setting push notification configuration.
 	MethodTasksPushNotificationSet = "tasks/pushNotification/set"
+
 	// MethodTasksPushNotificationGet is the method name for getting push notification configuration.
 	MethodTasksPushNotificationGet = "tasks/pushNotification/get"
+
 	// MethodTasksSendSubscribe is the method name for sending a task and subscribing to updates.
 	MethodTasksSendSubscribe = "tasks/sendSubscribe"
+
 	// MethodTasksResubscribe is the method name for resubscribing to task updates.
 	MethodTasksResubscribe = "tasks/resubscribe"
 )
