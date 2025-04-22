@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/bytedance/sonic"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -59,7 +60,10 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 		agentCard:   agentCard,
 		taskManager: taskManager,
 		logger:      slog.Default(),
-		tracer:      otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a/server"),
+		tracer: otel.GetTracerProvider().Tracer("github.com/go-a2a/a2a/server",
+			trace.WithSchemaURL(semconv.SchemaURL),
+			trace.WithInstrumentationVersion(otel.Version()),
+		),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -71,7 +75,7 @@ func NewServer(host, port string, agentCard *a2a.AgentCard, taskManager TaskMana
 	// Handle A2A API requests
 	mux.HandleFunc("POST "+s.endpoint, s.requestHandler)
 
-	h := http.Handler(mux)
+	h := otelhttp.NewHandler(mux, "a2a", otelhttp.WithPublicEndpoint())
 	if len(s.handlers) > 0 {
 		h = s.handlers[len(s.handlers)-1](h)
 		for i := len(s.handlers) - 2; i >= 0; i-- {
