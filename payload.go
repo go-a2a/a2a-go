@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/bytedance/sonic"
+
+	"github.com/go-a2a/a2a/internal/jsonrpc2"
 )
 
 // A2A RPC method names.
@@ -35,7 +37,7 @@ const (
 
 // SendTaskRequest represents a request to initiate or continue a task.
 type SendTaskRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	// Method is always "tasks/send".
 	Params TaskSendParams `json:"params"`
@@ -49,11 +51,12 @@ func (r *SendTaskRequest) UnmarshalJSON(data []byte) error {
 	}
 
 	r.Method = MethodTasksSend
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		var err error
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -71,19 +74,21 @@ func (r *SendTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewSendTaskRequest creates a new [SendTaskRequest].
-func NewSendTaskRequest(id ID, params TaskSendParams) *SendTaskRequest {
+func NewSendTaskRequest(id string, params TaskSendParams) *SendTaskRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksSend, params)
+	if err != nil {
+		panic(err)
+	}
 	return &SendTaskRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksSend,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // SendTaskResponse represents a response to a [SendTaskRequest].
 type SendTaskResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains the task if successful.
 	Result *Task `json:"result,omitempty"`
@@ -91,24 +96,24 @@ type SendTaskResponse struct {
 
 // GetTaskRequest represents a request to retrieve the current state of a task.
 type GetTaskRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskQueryParams `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *GetTaskRequest) UnmarshalJSON(data []byte) error {
+func (r *GetTaskRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksGet
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -126,19 +131,21 @@ func (r *GetTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewGetTaskRequest creates a new [GetTaskRequest].
-func NewGetTaskRequest(id ID, params TaskQueryParams) *GetTaskRequest {
+func NewGetTaskRequest(id string, params TaskQueryParams) *GetTaskRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksGet, params)
+	if err != nil {
+		panic(err)
+	}
 	return &GetTaskRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksGet,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // GetTaskResponse represents a response to a GetTaskRequest.
 type GetTaskResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains the task if successful.
 	Result *Task `json:"result,omitempty"`
@@ -146,24 +153,24 @@ type GetTaskResponse struct {
 
 // CancelTaskRequest represents a request to cancel a running task.
 type CancelTaskRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskIDParams `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *CancelTaskRequest) UnmarshalJSON(data []byte) error {
+func (r *CancelTaskRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksCancel
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -181,19 +188,21 @@ func (r *CancelTaskRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewCancelTaskRequest creates a new [CancelTaskRequest].
-func NewCancelTaskRequest(id ID, params TaskIDParams) *CancelTaskRequest {
+func NewCancelTaskRequest(id string, params TaskIDParams) *CancelTaskRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksCancel, params)
+	if err != nil {
+		panic(err)
+	}
 	return &CancelTaskRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksCancel,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // CancelTaskResponse represents a response to a CancelTaskRequest.
 type CancelTaskResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains the updated task if successful.
 	Result *Task `json:"result,omitempty"`
@@ -201,24 +210,24 @@ type CancelTaskResponse struct {
 
 // SetTaskPushNotificationRequest represents a request to set or update push notification configuration.
 type SetTaskPushNotificationRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskPushNotificationConfig `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
+func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksPushNotificationSet
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -236,19 +245,21 @@ func (r *SetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewSetTaskPushNotificationRequest creates a new [SetTaskPushNotificationRequest].
-func NewSetTaskPushNotificationRequest(id ID, params TaskPushNotificationConfig) *SetTaskPushNotificationRequest {
+func NewSetTaskPushNotificationRequest(id string, params TaskPushNotificationConfig) *SetTaskPushNotificationRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksPushNotificationSet, params)
+	if err != nil {
+		panic(err)
+	}
 	return &SetTaskPushNotificationRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksPushNotificationSet,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // SetTaskPushNotificationResponse represents a response to a SetTaskPushNotificationRequest.
 type SetTaskPushNotificationResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains the confirmed config if successful.
 	Result *TaskPushNotificationConfig `json:"result,omitempty"`
@@ -256,24 +267,24 @@ type SetTaskPushNotificationResponse struct {
 
 // GetTaskPushNotificationRequest represents a request to retrieve push notification configuration.
 type GetTaskPushNotificationRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskIDParams `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
+func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksPushNotificationGet
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -291,19 +302,21 @@ func (r *GetTaskPushNotificationRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewGetTaskPushNotificationRequest creates a new [GetTaskPushNotificationRequest].
-func NewGetTaskPushNotificationRequest(id ID, params TaskIDParams) *GetTaskPushNotificationRequest {
+func NewGetTaskPushNotificationRequest(id string, params TaskIDParams) *GetTaskPushNotificationRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksPushNotificationGet, params)
+	if err != nil {
+		panic(err)
+	}
 	return &GetTaskPushNotificationRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksPushNotificationGet,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // GetTaskPushNotificationResponse represents a response to a [GetTaskPushNotificationRequest].
 type GetTaskPushNotificationResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains the push notification config if successful.
 	Result *TaskPushNotificationConfig `json:"result,omitempty"`
@@ -311,24 +324,24 @@ type GetTaskPushNotificationResponse struct {
 
 // SendTaskStreamingRequest represents a request to send a task and subscribe to updates.
 type SendTaskStreamingRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskSendParams `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) error {
+func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksSendSubscribe
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -346,19 +359,21 @@ func (r *SendTaskStreamingRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewSendTaskStreamingRequest creates a new [SendTaskStreamingRequest].
-func NewSendTaskStreamingRequest(id ID, params TaskSendParams) *SendTaskStreamingRequest {
+func NewSendTaskStreamingRequest(id string, params TaskSendParams) *SendTaskStreamingRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksSendSubscribe, params)
+	if err != nil {
+		panic(err)
+	}
 	return &SendTaskStreamingRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksSendSubscribe,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }
 
 // SendTaskStreamingResponse represents a streaming response event for a [SendTaskStreamingRequest].
 type SendTaskStreamingResponse struct {
-	JSONRPCResponse
+	*jsonrpc2.Response
 
 	// Result contains either a [TaskStatusUpdateEvent] or [TaskArtifactUpdateEvent].
 	Result TaskEvent `json:"result,omitempty"`
@@ -366,24 +381,24 @@ type SendTaskStreamingResponse struct {
 
 // TaskResubscriptionRequest represents a request to resubscribe to task updates.
 type TaskResubscriptionRequest struct {
-	JSONRPCRequest
+	*jsonrpc2.Request
 
 	Params TaskIDParams `json:"params"`
 }
 
 // UnmarshalJSON implements [json.Unmarshaler].
-func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) error {
+func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) (err error) {
 	var m map[string]any
 	if err := sonic.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal to map[string]any: %w", err)
 	}
 
 	r.Method = MethodTasksResubscribe
-	r.JSONRPCMessage = JSONRPCMessage{
-		JSONRPC: "2.0",
-	}
 	if id, ok := m["id"].(string); ok {
-		r.JSONRPCMessage.ID = NewID(id)
+		r.Request.ID, err = jsonrpc2.MakeID(id)
+		if err != nil {
+			return err
+		}
 	}
 
 	paramsData, err := sonic.ConfigFastest.Marshal(m["params"])
@@ -401,12 +416,14 @@ func (r *TaskResubscriptionRequest) UnmarshalJSON(data []byte) error {
 }
 
 // NewTaskResubscriptionRequest creates a new [TaskResubscriptionRequest].
-func NewTaskResubscriptionRequest(id ID, params TaskIDParams) *TaskResubscriptionRequest {
+func NewTaskResubscriptionRequest(id string, params TaskIDParams) *TaskResubscriptionRequest {
+	jID, _ := jsonrpc2.MakeID(id)
+	req, err := jsonrpc2.NewCall(jID, MethodTasksResubscribe, params)
+	if err != nil {
+		panic(err)
+	}
 	return &TaskResubscriptionRequest{
-		JSONRPCRequest: JSONRPCRequest{
-			JSONRPCMessage: NewJSONRPCMessage(id),
-			Method:         MethodTasksResubscribe,
-		},
-		Params: params,
+		Request: req,
+		Params:  params,
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/go-a2a/a2a"
+	"github.com/go-a2a/a2a/internal/jsonrpc2"
 )
 
 const (
@@ -210,11 +211,13 @@ func (s *Server) requestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writeResponse(ctx context.Context, w http.ResponseWriter, id a2a.ID, result any) {
+func (s *Server) writeResponse(ctx context.Context, w http.ResponseWriter, id jsonrpc2.ID, result any) {
 	// Write success response
-	resp := &a2a.JSONRPCResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(id),
-		Result:         result,
+	resp, err := jsonrpc2.NewResponse(id, result, nil)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "marshal response", slog.Any("error", err))
+		s.writeError(ctx, w, a2a.InternalErrorCode, "create response")
+		return
 	}
 
 	data, err := sonic.ConfigFastest.Marshal(resp)
@@ -451,7 +454,7 @@ func (s *Server) handleTaskResubscription(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 
 	// Create a channel for the task events
-	ch, err := s.taskManager.OnResubscribeToTask(ctx, &req)
+	events, err := s.taskManager.OnResubscribeToTask(ctx, &req)
 	if err != nil {
 		s.writeError(ctx, w, a2a.InternalErrorCode, fmt.Errorf("subscribe to task: %w", err).Error())
 		return
@@ -461,11 +464,6 @@ func (s *Server) handleTaskResubscription(w http.ResponseWriter, r *http.Request
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		s.writeError(ctx, w, a2a.InternalErrorCode, "streaming not supported by response writer")
-		return
-	}
-
-	events, ok := ch.(<-chan a2a.TaskEvent)
-	if !ok {
 		return
 	}
 

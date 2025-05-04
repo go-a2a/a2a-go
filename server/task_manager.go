@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/go-a2a/a2a"
+	"github.com/go-a2a/a2a/internal/jsonrpc2"
 )
 
 // TaskManager is the interface that task managers must implement.
@@ -41,7 +42,7 @@ type TaskManager interface {
 	// OnResubscribeToTask resubscribes to a task's updates.
 	//
 	// Return the `<-chan a2a.TaskEvent`, or [a2a.JSONRPCResponse].
-	OnResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (any, error)
+	OnResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (<-chan a2a.TaskEvent, error)
 }
 
 // InMemoryTaskManager is an in-memory implementation of TaskManager.
@@ -124,11 +125,13 @@ func (tm *InMemoryTaskManager) OnGetTask(ctx context.Context, req *a2a.GetTaskRe
 
 	tm.logger.InfoContext(ctx, "task retrieved", slog.String("task_id", taskID), slog.String("state", string(task.Status.State)))
 
+	resp, err := jsonrpc2.NewResponse(req.ID, task, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &a2a.GetTaskResponse{
-		JSONRPCResponse: a2a.JSONRPCResponse{
-			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		},
-		Result: task,
+		Response: resp,
+		Result:   task,
 	}, nil
 }
 
@@ -175,11 +178,13 @@ func (tm *InMemoryTaskManager) OnCancelTask(ctx context.Context, req *a2a.Cancel
 
 	tm.logger.InfoContext(ctx, "task canceled", slog.String("task_id", taskID))
 
+	resp, err := jsonrpc2.NewResponse(req.ID, task, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &a2a.CancelTaskResponse{
-		JSONRPCResponse: a2a.JSONRPCResponse{
-			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		},
-		Result: task,
+		Response: resp,
+		Result:   task,
 	}, nil
 }
 
@@ -222,11 +227,13 @@ func (tm *InMemoryTaskManager) OnSetTaskPushNotification(ctx context.Context, re
 
 	tm.logger.InfoContext(ctx, "task push notification configured", slog.String("task_id", task.ID))
 
+	resp, err := jsonrpc2.NewResponse(req.ID, task, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &a2a.SetTaskPushNotificationResponse{
-		JSONRPCResponse: a2a.JSONRPCResponse{
-			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		},
-		Result: &task,
+		Response: resp,
+		Result:   &task,
 	}, nil
 }
 
@@ -264,24 +271,26 @@ func (tm *InMemoryTaskManager) OnGetTaskPushNotification(ctx context.Context, re
 
 	tm.logger.InfoContext(ctx, "task push notification retrieved", slog.String("task_id", task.ID))
 
+	resp, err := jsonrpc2.NewResponse(req.ID, &config, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &a2a.GetTaskPushNotificationResponse{
-		JSONRPCResponse: a2a.JSONRPCResponse{
-			JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		},
-		Result: &config,
-	}, nil
-}
-
-// OnResubscribeToTask resubscribes to a task's updates.
-func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (any, error) {
-	return &a2a.JSONRPCResponse{
-		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
-		Error:          a2a.NewUnsupportedOperationError(),
+		Response: resp,
+		Result:   &config,
 	}, nil
 }
 
 // onResubscribeToTask resubscribes to a task's updates.
-func (tm *InMemoryTaskManager) onResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (any, error) {
+// func (tm *InMemoryTaskManager) onResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (any, error) {
+// 	return &a2a.JSONRPCResponse{
+// 		JSONRPCMessage: a2a.NewJSONRPCMessage(req.ID),
+// 		Error:          a2a.NewUnsupportedOperationError(),
+// 	}, nil
+// }
+
+// OnResubscribeToTask resubscribes to a task's updates.
+func (tm *InMemoryTaskManager) OnResubscribeToTask(ctx context.Context, req *a2a.TaskResubscriptionRequest) (<-chan a2a.TaskEvent, error) {
 	ctx, span := tm.tracer.Start(ctx, "task_manager.OnResubscribeToTask",
 		trace.WithAttributes(attribute.String("a2a.task_id", req.Params.ID)))
 	defer span.End()
@@ -372,5 +381,6 @@ func (tm *InMemoryTaskManager) UpdateTaskStatus(ctx context.Context, taskID stri
 	tm.notifySubscribers(ctx, taskID, event)
 
 	tm.logger.InfoContext(ctx, "task status updated", slog.String("task_id", taskID), slog.String("state", string(status.State)))
+
 	return nil
 }
