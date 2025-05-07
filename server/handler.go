@@ -17,10 +17,8 @@ import (
 func (s *Server) handleTasksSend(w http.ResponseWriter, req jsonrpc2.Request) {
 	var params a2a.TaskSendParams
 	if err := sonic.ConfigDefault.Unmarshal(req.Params, &params); err != nil {
-		if err != nil {
-			s.sendErrorResponse(w, jsonrpc2.ErrInvalidParams)
-			return
-		}
+		s.sendErrorResponse(w, jsonrpc2.ErrInvalidParams)
+		return
 	}
 
 	// Validate required fields
