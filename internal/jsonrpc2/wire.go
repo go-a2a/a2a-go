@@ -1,5 +1,5 @@
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2018 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package jsonrpc2
@@ -34,7 +34,7 @@ var (
 	// ErrUnknown should be used for all non coded errors.
 	ErrUnknown = NewError(-32001, "JSON RPC unknown error")
 	// ErrServerClosing is returned for calls that arrive while the server is closing.
-	ErrServerClosing = NewError(-32002, "JSON RPC server is closing")
+	ErrServerClosing = NewError(-32004, "JSON RPC server is closing")
 	// ErrClientClosing is a dummy error returned for calls initiated while the client is closing.
 	ErrClientClosing = NewError(-32003, "JSON RPC client is closing")
 )

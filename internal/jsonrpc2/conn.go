@@ -1,5 +1,5 @@
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2018 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package jsonrpc2
@@ -13,13 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Binder builds a connection configuration.
@@ -66,11 +59,7 @@ type ConnectionOptions struct {
 // Connection is bidirectional; it does not have a designated server or client
 // end.
 type Connection struct {
-	tracer      trace.Tracer
-	meter       metric.Meter
-	propagators propagation.TextMapPropagator
-
-	seq atomic.Int64 // must only be accessed using atomic operations
+	seq int64 // must only be accessed using atomic operations
 
 	stateMu sync.Mutex
 	state   inFlightState // accessed only in updateInFlight
@@ -199,7 +188,6 @@ type incomingRequest struct {
 	*Request // the request being processed
 	ctx      context.Context
 	cancel   context.CancelFunc
-	span     trace.Span // called (and set to nil) when the response is sent
 }
 
 // Bind returns the options unmodified.
@@ -224,9 +212,6 @@ func NewConnection(ctx context.Context, cfg ConnectionConfig) *Connection {
 	ctx = notDone{ctx}
 
 	c := &Connection{
-		tracer:          otel.Tracer("github.com/go-a2a/a2a/internal/jsonrpc2"),
-		meter:           otel.Meter("github.com/go-a2a/a2a/internal/jsonrpc2"),
-		propagators:     otel.GetTextMapPropagator(),
 		state:           inFlightState{closer: cfg.Closer},
 		done:            make(chan struct{}),
 		writer:          make(chan Writer, 1),
@@ -302,15 +287,9 @@ func (c *Connection) start(ctx context.Context, reader Reader, preempter Preempt
 // The params will be marshaled to JSON before sending over the wire, and will
 // be handed to the method invoked.
 func (c *Connection) Notify(ctx context.Context, method string, params any) (err error) {
-	ctx, span := c.tracer.Start(ctx, "Connection.Notify", trace.WithAttributes(
-		attribute.String("method", method),
-		attribute.String("direction", "out"),
-	))
 	attempted := false
 
 	defer func() {
-		labelStatus(span, err)
-		span.End()
 		if attempted {
 			c.updateInFlight(func(s *inFlightState) {
 				s.outgoingNotifications--
@@ -341,7 +320,6 @@ func (c *Connection) Notify(ctx context.Context, method string, params any) (err
 		return fmt.Errorf("marshaling notify parameters: %v", err)
 	}
 
-	startedCounter.Add(ctx, 1)
 	return c.write(ctx, notify)
 }
 
@@ -352,18 +330,11 @@ func (c *Connection) Notify(ctx context.Context, method string, params any) (err
 // If sending the call failed, the response will be ready and have the error in it.
 func (c *Connection) Call(ctx context.Context, method string, params any) *AsyncCall {
 	// Generate a new request identifier.
-	id := Int64ID(c.seq.Add(1))
-	ctx, span := c.tracer.Start(ctx, "Connection.Call", trace.WithAttributes(
-		attribute.String("method", method),
-		attribute.String("direction", "out"),
-		attribute.String("id", fmt.Sprintf("%q", id)),
-	))
+	id := Int64ID(atomic.AddInt64(&c.seq, 1))
 
 	ac := &AsyncCall{
 		id:    id,
 		ready: make(chan struct{}),
-		ctx:   ctx,
-		span:  span,
 	}
 	// When this method returns, either ac is retired, or the request has been
 	// written successfully and the call is awaiting a response (to be provided by
@@ -390,7 +361,6 @@ func (c *Connection) Call(ctx context.Context, method string, params any) *Async
 		return ac
 	}
 
-	startedCounter.Add(ctx, 1)
 	if err := c.write(ctx, call); err != nil {
 		// Sending failed. We will never get a response, so deliver a fake one if it
 		// wasn't already retired by the connection breaking.
@@ -409,10 +379,8 @@ func (c *Connection) Call(ctx context.Context, method string, params any) *Async
 
 type AsyncCall struct {
 	id       ID
-	ready    chan struct{} // closed after response has been set and span has been ended
+	ready    chan struct{} // closed after response has been set
 	response *Response
-	ctx      context.Context // for event logging only
-	span     trace.Span      // close the tracing span when all processing for the message is complete
 }
 
 // ID used for this call.
@@ -440,12 +408,6 @@ func (ac *AsyncCall) retire(response *Response) {
 	}
 
 	ac.response = response
-	labelStatus(ac.span, response.Error)
-	ac.span.End()
-	// Allow the trace context, which may retain a lot of reachable values,
-	// to be garbage-collected.
-	ac.ctx, ac.span = nil, nil
-
 	close(ac.ready)
 }
 
@@ -534,18 +496,15 @@ func (c *Connection) Close() error {
 func (c *Connection) readIncoming(ctx context.Context, reader Reader, preempter Preempter) {
 	var err error
 	for {
-		var (
-			msg Message
-			n   int64
-		)
-		msg, n, err = reader.Read(ctx)
+		var msg Message
+		msg, err = reader.Read(ctx)
 		if err != nil {
 			break
 		}
 
 		switch msg := msg.(type) {
 		case *Request:
-			c.acceptRequest(ctx, msg, n, preempter)
+			c.acceptRequest(ctx, msg, preempter)
 
 		case *Response:
 			c.updateInFlight(func(s *inFlightState) {
@@ -577,27 +536,14 @@ func (c *Connection) readIncoming(ctx context.Context, reader Reader, preempter 
 
 // acceptRequest either handles msg synchronously or enqueues it to be handled
 // asynchronously.
-func (c *Connection) acceptRequest(ctx context.Context, msg *Request, msgBytes int64, preempter Preempter) {
-	// Add a span to the context for this request.
-	attrs := append(make([]attribute.KeyValue, 0, 3), // Make space for the ID if present.
-		attribute.String("method", msg.Method),
-		attribute.String("direction", "in"),
-	)
-	if msg.IsCall() {
-		attrs = append(attrs, attribute.String("id", fmt.Sprintf("%q", msg.ID)))
-	}
-	ctx, endSpan := c.tracer.Start(ctx, msg.Method, trace.WithAttributes(attrs...))
-	startedCounter.Add(ctx, 1)
-	receivedBytesGauge.Record(ctx, msgBytes)
-
+func (c *Connection) acceptRequest(ctx context.Context, msg *Request, preempter Preempter) {
 	// In theory notifications cannot be cancelled, but we build them a cancel
 	// context anyway.
-	ctx, cancel := context.WithCancel(ctx)
+	reqCtx, cancel := context.WithCancel(ctx)
 	req := &incomingRequest{
 		Request: msg,
-		ctx:     ctx,
+		ctx:     reqCtx,
 		cancel:  cancel,
-		span:    endSpan,
 	}
 
 	// If the request is a call, add it to the incoming map so it can be
@@ -730,10 +676,6 @@ func (c *Connection) processResult(from any, req *incomingRequest, result any, e
 		err = fmt.Errorf("%w: %q", ErrMethodNotFound, req.Method)
 	}
 
-	if req.span == nil {
-		return c.internalErrorf("%#v produced a duplicate %q Response", from, req.Method)
-	}
-
 	if result != nil && err != nil {
 		c.internalErrorf("%#v returned a non-nil result with a non-nil error for %s:\n%v\n%#v", from, req.Method, err, result)
 		result = nil // Discard the spurious result and respond with err.
@@ -769,16 +711,11 @@ func (c *Connection) processResult(from any, req *incomingRequest, result any, e
 		if err != nil {
 			// TODO: can/should we do anything with this error beyond writing it to the event log?
 			// (Is this the right label to attach to the log?)
-			req.span.SetStatus(codes.Error, err.Error())
 		}
 	}
 
-	labelStatus(req.span, err)
-
-	// Cancel the request and finalize the event span to free any associated resources.
+	// Cancel the request to free any associated resources.
 	req.cancel()
-	req.span.End()
-	req.span = nil
 	c.updateInFlight(func(s *inFlightState) {
 		if s.incoming == 0 {
 			panic("jsonrpc2_v2: processResult called when incoming count is already zero")
@@ -793,8 +730,7 @@ func (c *Connection) processResult(from any, req *incomingRequest, result any, e
 func (c *Connection) write(ctx context.Context, msg Message) error {
 	writer := <-c.writer
 	defer func() { c.writer <- writer }()
-	n, err := writer.Write(ctx, msg)
-	sentBytesGauge.Record(ctx, n)
+	err := writer.Write(ctx, msg)
 
 	if err != nil && ctx.Err() == nil {
 		// The call to Write failed, and since ctx.Err() is nil we can't attribute
@@ -829,15 +765,6 @@ func (c *Connection) internalErrorf(format string, args ...any) error {
 	c.onInternalError(err)
 
 	return fmt.Errorf("%w: %v", ErrInternal, err)
-}
-
-// labelStatus labels the status of the event in ctx based on whether err is nil.
-func labelStatus(span trace.Span, err error) {
-	if err == nil {
-		span.SetStatus(codes.Ok, "")
-	} else {
-		span.SetStatus(codes.Error, err.Error())
-	}
 }
 
 // notDone is a context.Context wrapper that returns a nil Done channel.
