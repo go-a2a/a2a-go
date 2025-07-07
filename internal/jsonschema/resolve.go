@@ -1,5 +1,5 @@
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2025 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 // This file deals with preparing a schema for validation, including various checks,
@@ -26,6 +26,10 @@ type Resolved struct {
 	// map from $ids to their schemas
 	resolvedURIs map[string]*Schema
 }
+
+// Schema returns the schema that was resolved.
+// It must not be modified.
+func (r *Resolved) Schema() *Schema { return r.root }
 
 // A Loader reads and unmarshals the schema at uri, if any.
 type Loader func(uri *url.URL) (*Schema, error)

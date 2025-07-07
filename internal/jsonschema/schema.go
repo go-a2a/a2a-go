@@ -1,5 +1,5 @@
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2025 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 package jsonschema
@@ -17,6 +17,8 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+
+	"github.com/go-a2a/a2a/internal/util"
 )
 
 // A Schema is a JSON schema object.
@@ -124,6 +126,9 @@ type Schema struct {
 
 	// https://json-schema.org/draft/2020-12/draft-bhutton-json-schema-validation-00#rfc.section.7
 	Format string `json:"format,omitempty"`
+
+	// Extra allows for additional keywords beyond those specified.
+	Extra map[string]any `json:"-"`
 
 	// computed fields
 
@@ -234,7 +239,7 @@ func (s *Schema) MarshalJSON() ([]byte, error) {
 		Type:                 typ,
 		schemaWithoutMethods: (*schemaWithoutMethods)(s),
 	}
-	return json.Marshal(ms)
+	return marshalStructWithMap(&ms, "Extra")
 }
 
 func (s *Schema) UnmarshalJSON(data []byte) error {
@@ -267,7 +272,7 @@ func (s *Schema) UnmarshalJSON(data []byte) error {
 	}{
 		schemaWithoutMethods: (*schemaWithoutMethods)(s),
 	}
-	if err := json.Unmarshal(data, &ms); err != nil {
+	if err := unmarshalStructWithMap(data, &ms, "Extra"); err != nil {
 		return err
 	}
 	// Unmarshal "type" as either Type or Types.
@@ -426,8 +431,9 @@ var (
 
 func init() {
 	for _, sf := range reflect.VisibleFields(reflect.TypeFor[Schema]()) {
-		if name, ok := jsonName(sf); ok {
-			schemaFieldInfos = append(schemaFieldInfos, structFieldInfo{sf, name})
+		info := util.FieldJSONInfo(sf)
+		if !info.Omit {
+			schemaFieldInfos = append(schemaFieldInfos, structFieldInfo{sf, info.Name})
 		}
 	}
 	slices.SortFunc(schemaFieldInfos, func(i1, i2 structFieldInfo) int {

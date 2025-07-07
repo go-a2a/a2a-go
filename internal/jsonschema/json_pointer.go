@@ -1,5 +1,5 @@
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2025 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 // This file implements JSON Pointers.
@@ -26,6 +26,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/go-a2a/a2a/internal/util"
 )
 
 var (
@@ -69,7 +71,7 @@ func parseJSONPointer(ptr string) (segments []string, err error) {
 // This implementation suffices for JSON Schema: pointers are applied only to Schemas,
 // and refer only to Schemas.
 func dereferenceJSONPointer(s *Schema, sptr string) (_ *Schema, err error) {
-	defer wrapf(&err, "JSON Pointer %q", sptr)
+	defer util.Wrapf(&err, "JSON Pointer %q", sptr)
 
 	segments, err := parseJSONPointer(sptr)
 	if err != nil {

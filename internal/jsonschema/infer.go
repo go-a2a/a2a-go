@@ -1,5 +1,5 @@
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2025 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 // This file contains functions that infer a schema from a Go type.
@@ -9,48 +9,53 @@ package jsonschema
 import (
 	"fmt"
 	"reflect"
-	"slices"
-	"strings"
+
+	"github.com/go-a2a/a2a/internal/util"
 )
 
 // For constructs a JSON schema object for the given type argument.
 //
-// It is a convenience for ForType.
-func For[T any]() (*Schema, error) {
-	return ForType(reflect.TypeFor[T]())
-}
-
-// ForType constructs a JSON schema object for the given type.
 // It translates Go types into compatible JSON schema types, as follows:
-//   - strings have schema type "string"
-//   - bools have schema type "boolean"
-//   - signed and unsigned integer types have schema type "integer"
-//   - floating point types have schema type "number"
-//   - slices and arrays have schema type "array", and a corresponding schema
-//     for items
-//   - maps with string key have schema type "object", and corresponding
-//     schema for additionalProperties
-//   - structs have schema type "object", and disallow additionalProperties.
+//   - Strings have schema type "string".
+//   - Bools have schema type "boolean".
+//   - Signed and unsigned integer types have schema type "integer".
+//   - Floating point types have schema type "number".
+//   - Slices and arrays have schema type "array", and a corresponding schema
+//     for items.
+//   - Maps with string key have schema type "object", and corresponding
+//     schema for additionalProperties.
+//   - Structs have schema type "object", and disallow additionalProperties.
 //     Their properties are derived from exported struct fields, using the
-//     struct field json name. Fields that are marked "omitempty" are
+//     struct field JSON name. Fields that are marked "omitempty" are
 //     considered optional; all other fields become required properties.
 //
-// It returns an error if t contains (possibly recursively) any of the following Go
+// For returns an error if t contains (possibly recursively) any of the following Go
 // types, as they are incompatible with the JSON schema spec.
 //   - maps with key other than 'string'
 //   - function types
 //   - complex numbers
 //   - unsafe pointers
 //
-// TODO(rfindley): we could perhaps just skip these incompatible fields.
-func ForType(t reflect.Type) (*Schema, error) {
-	return typeSchema(t)
+// The types must not have cycles.
+func For[T any]() (*Schema, error) {
+	// TODO: consider skipping incompatible fields, instead of failing.
+	s, err := forType(reflect.TypeFor[T]())
+	if err != nil {
+		var z T
+		return nil, fmt.Errorf("For[%T](): %w", z, err)
+	}
+	return s, nil
 }
 
-func typeSchema(t reflect.Type) (*Schema, error) {
-	if t.Kind() == reflect.Pointer {
+func forType(t reflect.Type) (*Schema, error) {
+	// Follow pointers: the schema for *T is almost the same as for T, except that
+	// an explicit JSON "null" is allowed for the pointer.
+	allowNull := false
+	for t.Kind() == reflect.Pointer {
+		allowNull = true
 		t = t.Elem()
 	}
+
 	var (
 		s   = new(Schema)
 		err error
@@ -76,14 +81,14 @@ func typeSchema(t reflect.Type) (*Schema, error) {
 			return nil, fmt.Errorf("unsupported map key type %v", t.Key().Kind())
 		}
 		s.Type = "object"
-		s.AdditionalProperties, err = typeSchema(t.Elem())
+		s.AdditionalProperties, err = forType(t.Elem())
 		if err != nil {
 			return nil, fmt.Errorf("computing map value schema: %v", err)
 		}
 
 	case reflect.Slice, reflect.Array:
 		s.Type = "array"
-		s.Items, err = typeSchema(t.Elem())
+		s.Items, err = forType(t.Elem())
 		if err != nil {
 			return nil, fmt.Errorf("computing element schema: %v", err)
 		}
@@ -102,44 +107,28 @@ func typeSchema(t reflect.Type) (*Schema, error) {
 
 		for i := range t.NumField() {
 			field := t.Field(i)
-			name, required, include := parseField(field)
-			if !include {
+			info := util.FieldJSONInfo(field)
+			if info.Omit {
 				continue
 			}
 			if s.Properties == nil {
 				s.Properties = make(map[string]*Schema)
 			}
-			s.Properties[name], err = typeSchema(field.Type)
+			s.Properties[info.Name], err = forType(field.Type)
 			if err != nil {
 				return nil, err
 			}
-			if required {
-				s.Required = append(s.Required, name)
+			if !info.Settings["omitempty"] && !info.Settings["omitzero"] {
+				s.Required = append(s.Required, info.Name)
 			}
 		}
 
 	default:
 		return nil, fmt.Errorf("type %v is unsupported by jsonschema", t)
 	}
+	if allowNull && s.Type != "" {
+		s.Types = []string{"null", s.Type}
+		s.Type = ""
+	}
 	return s, nil
-}
-
-func parseField(f reflect.StructField) (name string, required, include bool) {
-	if !f.IsExported() {
-		return "", false, false
-	}
-	name = f.Name
-	required = true
-	if tag, ok := f.Tag.Lookup("json"); ok {
-		props := strings.Split(tag, ",")
-		if props[0] != "" {
-			if props[0] == "-" {
-				return "", false, false
-			}
-			name = props[0]
-		}
-		// TODO: support 'omitzero' as well.
-		required = !slices.Contains(props[1:], "omitempty")
-	}
-	return name, required, true
 }

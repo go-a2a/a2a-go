@@ -1,5 +1,5 @@
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Copyright 2025 The Go MCP SDK Authors. All rights reserved.
+// Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
 /*
@@ -40,7 +40,7 @@ or as a value of this type:
 
 # Inference
 
-The [For] and [ForType] functions return a [Schema] describing the given Go type.
+The [For] function returns a [Schema] describing the given Go type.
 The type cannot contain any function or channel types, and any map types must have a string key.
 For example, calling For on the above Player type results in this schema:
 
