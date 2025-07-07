@@ -274,6 +274,8 @@ type TaskStatusUpdateEvent struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+var _ TaskEvent = (*TaskStatusUpdateEvent)(nil)
+
 // TaskID implements [TaskEvent].
 func (e *TaskStatusUpdateEvent) TaskID() string {
 	return e.ID
@@ -290,6 +292,8 @@ type TaskArtifactUpdateEvent struct {
 	// Metadata contains optional event metadata.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
+
+var _ TaskEvent = (*TaskArtifactUpdateEvent)(nil)
 
 // GetTaskID implements [TaskEvent].
 func (e *TaskArtifactUpdateEvent) TaskID() string {
