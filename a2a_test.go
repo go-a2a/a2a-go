@@ -18,23 +18,23 @@ func TestRole(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		role a2a.Role
+		role a2a.MessageRole
 		want string
 	}{
 		"user": {
-			role: a2a.RoleUser,
+			role: a2a.MessageRoleUser,
 			want: "user",
 		},
 		"agent": {
-			role: a2a.RoleAgent,
+			role: a2a.MessageRoleAgent,
 			want: "agent",
 		},
 		"empty": {
-			role: a2a.Role(""),
+			role: a2a.MessageRole(""),
 			want: "",
 		},
 		"arbitrary": {
-			role: a2a.Role("custom"),
+			role: a2a.MessageRole("custom"),
 			want: "custom",
 		},
 	}
@@ -82,58 +82,58 @@ func TestPart_Type(t *testing.T) {
 	}
 }
 
-func TestFileContent_CheckContent(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		fc      a2a.FileContent
-		wantErr bool
-	}{
-		"valid_bytes": {
-			fc: a2a.FileContent{
-				Name:     "test.txt",
-				MIMEType: "text/plain",
-				Bytes:    "ZGF0YQ==",
-			},
-			wantErr: false,
-		},
-		"valid_uri": {
-			fc: a2a.FileContent{
-				Name:     "test.txt",
-				MIMEType: "text/plain",
-				URI:      "https://example.com/file.txt",
-			},
-			wantErr: false,
-		},
-		"missing_both": {
-			fc: a2a.FileContent{
-				Name:     "test.txt",
-				MIMEType: "text/plain",
-			},
-			wantErr: true,
-		},
-		"both_present": {
-			fc: a2a.FileContent{
-				Name:     "test.txt",
-				MIMEType: "text/plain",
-				Bytes:    "ZGF0YQ==",
-				URI:      "https://example.com/file.txt",
-			},
-			wantErr: true,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := tt.fc.CheckContent()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("FileContent.CheckContent() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
+// func TestFileContent_CheckContent(t *testing.T) {
+// 	t.Parallel()
+//
+// 	tests := map[string]struct {
+// 		fc      a2a.File
+// 		wantErr bool
+// 	}{
+// 		"valid_bytes": {
+// 			fc: a2a.FileContent{
+// 				Name:     "test.txt",
+// 				MIMEType: "text/plain",
+// 				Bytes:    "ZGF0YQ==",
+// 			},
+// 			wantErr: false,
+// 		},
+// 		"valid_uri": {
+// 			fc: a2a.FileContent{
+// 				Name:     "test.txt",
+// 				MIMEType: "text/plain",
+// 				URI:      "https://example.com/file.txt",
+// 			},
+// 			wantErr: false,
+// 		},
+// 		"missing_both": {
+// 			fc: a2a.FileContent{
+// 				Name:     "test.txt",
+// 				MIMEType: "text/plain",
+// 			},
+// 			wantErr: true,
+// 		},
+// 		"both_present": {
+// 			fc: a2a.FileContent{
+// 				Name:     "test.txt",
+// 				MIMEType: "text/plain",
+// 				Bytes:    "ZGF0YQ==",
+// 				URI:      "https://example.com/file.txt",
+// 			},
+// 			wantErr: true,
+// 		},
+// 	}
+//
+// 	for name, tt := range tests {
+// 		t.Run(name, func(t *testing.T) {
+// 			t.Parallel()
+//
+// 			err := tt.fc.CheckContent()
+// 			if (err != nil) != tt.wantErr {
+// 				t.Errorf("FileContent.CheckContent() error = %v, wantErr %v", err, tt.wantErr)
+// 			}
+// 		})
+// 	}
+// }
 
 func TestTaskStatusUpdateEvent_TaskID(t *testing.T) {
 	t.Parallel()
@@ -178,7 +178,7 @@ func TestTask(t *testing.T) {
 	now := time.Now().UTC()
 	task := &a2a.Task{
 		ID:        "test-id",
-		SessionID: "session-id",
+		ContextID: "session-id",
 		Status: a2a.TaskStatus{
 			State:     a2a.TaskStateSubmitted,
 			Timestamp: now,
@@ -206,8 +206,8 @@ func TestTask(t *testing.T) {
 	if task.ID != "test-id" {
 		t.Errorf("Task.ID = %v, want %v", task.ID, "test-id")
 	}
-	if task.SessionID != "session-id" {
-		t.Errorf("Task.SessionID = %v, want %v", task.SessionID, "session-id")
+	if task.ContextID != "session-id" {
+		t.Errorf("Task.SessionID = %v, want %v", task.ContextID, "session-id")
 	}
 	if task.Status.State != a2a.TaskStateSubmitted {
 		t.Errorf("Task.Status.State = %v, want %v", task.Status.State, a2a.TaskStateSubmitted)
@@ -236,7 +236,7 @@ func TestMessage(t *testing.T) {
 				Text: "hello",
 			},
 			&a2a.FilePart{
-				File: a2a.FileContent{
+				File: &a2a.FileWithBytes{
 					Name:     "test.txt",
 					MIMEType: "text/plain",
 					Bytes:    "ZGF0YQ==",
@@ -287,10 +287,10 @@ func TestArtifact(t *testing.T) {
 		Parts: []a2a.Part{
 			&a2a.TextPart{Text: "artifact content"},
 		},
-		Index:     1,
-		Append:    true,
-		LastChunk: true,
-		Metadata:  map[string]any{"key": "value"},
+		// Index:     1,
+		// Append:    true,
+		// LastChunk: true,
+		Metadata: map[string]any{"key": "value"},
 	}
 
 	if artifact.Name != "artifact" {
@@ -302,15 +302,15 @@ func TestArtifact(t *testing.T) {
 	if len(artifact.Parts) != 1 {
 		t.Errorf("len(Artifact.Parts) = %v, want %v", len(artifact.Parts), 1)
 	}
-	if artifact.Index != 1 {
-		t.Errorf("Artifact.Index = %v, want %v", artifact.Index, 1)
-	}
-	if !artifact.Append {
-		t.Errorf("Artifact.Append = %v, want %v", artifact.Append, true)
-	}
-	if !artifact.LastChunk {
-		t.Errorf("Artifact.LastChunk = %v, want %v", artifact.LastChunk, true)
-	}
+	// if artifact.Index != 1 {
+	// 	t.Errorf("Artifact.Index = %v, want %v", artifact.Index, 1)
+	// }
+	// if !artifact.Append {
+	// 	t.Errorf("Artifact.Append = %v, want %v", artifact.Append, true)
+	// }
+	// if !artifact.LastChunk {
+	// 	t.Errorf("Artifact.LastChunk = %v, want %v", artifact.LastChunk, true)
+	// }
 
 	// Check metadata
 	expectedMetadata := map[string]any{"key": "value"}
@@ -322,7 +322,7 @@ func TestArtifact(t *testing.T) {
 func TestAuthenticationInfo(t *testing.T) {
 	t.Parallel()
 
-	auth := a2a.AuthenticationInfo{
+	auth := a2a.PushNotificationAuthenticationInfo{
 		Schemes:     []string{"basic", "oauth2"},
 		Credentials: "token123",
 	}
@@ -347,7 +347,7 @@ func TestPushNotificationConfig(t *testing.T) {
 	config := a2a.PushNotificationConfig{
 		URL:   "https://example.com/push",
 		Token: "token123",
-		Authentication: &a2a.AuthenticationInfo{
+		Authentication: &a2a.PushNotificationAuthenticationInfo{
 			Schemes:     []string{"basic"},
 			Credentials: "token123",
 		},
@@ -390,11 +390,9 @@ func TestTaskQueryParams(t *testing.T) {
 	t.Parallel()
 
 	params := a2a.TaskQueryParams{
-		TaskIDParams: a2a.TaskIDParams{
-			ID:       "test-id",
-			Metadata: map[string]any{"key": "value"},
-		},
+		ID:            "test-id",
 		HistoryLength: 10,
+		Metadata:      map[string]any{"key": "value"},
 	}
 
 	if params.ID != "test-id" {
@@ -449,7 +447,7 @@ func TestAgentCard(t *testing.T) {
 			PushNotifications:      true,
 			StateTransitionHistory: true,
 		},
-		Authentication: &a2a.AgentAuthentication{
+		SecuritySchemes: &a2a.PushNotificationAuthenticationInfo{
 			Schemes:     []string{"basic"},
 			Credentials: "token123",
 		},
@@ -493,11 +491,11 @@ func TestAgentCard(t *testing.T) {
 	if diff := gocmp.Diff(wantCapabilities, card.Capabilities); diff != "" {
 		t.Errorf("card.Capabilities: (-want +got):\n%s", diff)
 	}
-	wantAuthentication := &a2a.AgentAuthentication{
+	wantAuthentication := &a2a.PushNotificationAuthenticationInfo{
 		Schemes:     []string{"basic"},
 		Credentials: "token123",
 	}
-	if diff := gocmp.Diff(wantAuthentication, card.Authentication); diff != "" {
+	if diff := gocmp.Diff(wantAuthentication, card.SecuritySchemes); diff != "" {
 		t.Errorf("card.Authentication: (-want +got):\n%s", diff)
 	}
 	wantDefaultInputModes := []string{"text", "file"}
