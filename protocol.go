@@ -5,10 +5,6 @@
 package a2a
 
 // Protocol types for version 2025-06-18.
-// To see the schema changes from the previous version, run:
-//
-//   prefix=https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/refs/heads/main/schema
-//   sdiff -l <(curl $prefix/2025-03-26/schema.ts) <(curl $prefix/2025/06-18/schema.ts)
 
 type CancelledParams struct {
 	// This property is reserved by the protocol to allow clients and servers to
@@ -26,28 +22,6 @@ type CancelledParams struct {
 
 func (x *CancelledParams) GetProgressToken() any  { return getProgressToken(x) }
 func (x *CancelledParams) SetProgressToken(t any) { setProgressToken(x, t) }
-
-// The severity of a log message.
-//
-// These map to syslog message severities, as specified in RFC-5424:
-// https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
-type LoggingLevel string
-
-type LoggingMessageParams struct {
-	// This property is reserved by the protocol to allow clients and servers to
-	// attach additional metadata to their responses.
-	Meta `json:"_meta,omitempty"`
-	// The data to be logged, such as a string message or an object. Any JSON
-	// serializable type is allowed here.
-	Data any `json:"data"`
-	// The severity of this log message.
-	Level LoggingLevel `json:"level"`
-	// An optional name of the logger issuing this message.
-	Logger string `json:"logger,omitempty"`
-}
-
-func (x *LoggingMessageParams) GetProgressToken() any  { return getProgressToken(x) }
-func (x *LoggingMessageParams) SetProgressToken(t any) { setProgressToken(x, t) }
 
 // Capabilities a client may support. Known capabilities are defined here, in
 // this schema, but this is not a closed set: any client can define its own,
@@ -71,7 +45,7 @@ type InitializeParams struct {
 	// attach additional metadata to their responses.
 	Meta         `json:"_meta,omitempty"`
 	Capabilities *ClientCapabilities `json:"capabilities"`
-	ClientInfo   *implementation     `json:"clientInfo"`
+	ClientInfo   *Implementation     `json:"clientInfo"`
 	// The latest version of the Model Context Protocol that the client supports.
 	// The client may decide to support older versions as well.
 	ProtocolVersion string `json:"protocolVersion"`
@@ -97,7 +71,7 @@ type InitializeResult struct {
 	// may not match the version that the client requested. If the client cannot
 	// support this version, it must disconnect.
 	ProtocolVersion string          `json:"protocolVersion"`
-	ServerInfo      *implementation `json:"serverInfo"`
+	ServerInfo      *Implementation `json:"serverInfo"`
 }
 
 type InitializedParams struct {
@@ -109,15 +83,46 @@ type InitializedParams struct {
 func (x *InitializedParams) GetProgressToken() any  { return getProgressToken(x) }
 func (x *InitializedParams) SetProgressToken(t any) { setProgressToken(x, t) }
 
+// The severity of a log message.
+//
+// These map to syslog message severities, as specified in RFC-5424:
+// https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
+type LoggingLevel string
+
+type LoggingMessageParams struct {
+	// This property is reserved by the protocol to allow clients and servers to
+	// attach additional metadata to their responses.
+	Meta `json:"_meta,omitempty"`
+	// The data to be logged, such as a string message or an object. Any JSON
+	// serializable type is allowed here.
+	Data any `json:"data"`
+	// The severity of this log message.
+	Level LoggingLevel `json:"level"`
+	// An optional name of the logger issuing this message.
+	Logger string `json:"logger,omitempty"`
+}
+
+func (x *LoggingMessageParams) GetProgressToken() any  { return getProgressToken(x) }
+func (x *LoggingMessageParams) SetProgressToken(t any) { setProgressToken(x, t) }
+
+type PingParams struct {
+	// This property is reserved by the protocol to allow clients and servers to
+	// attach additional metadata to their responses.
+	Meta `json:"_meta,omitempty"`
+}
+
+func (x *PingParams) GetProgressToken() any  { return getProgressToken(x) }
+func (x *PingParams) SetProgressToken(t any) { setProgressToken(x, t) }
+
 // SamplingCapabilities describes the capabilities for sampling.
 type SamplingCapabilities struct{}
 
 // ElicitationCapabilities describes the capabilities for elicitation.
 type ElicitationCapabilities struct{}
 
-// Describes the name and version of an MCP implementation, with an optional
+// An Implementation describes the name and version of an MCP implementation, with an optional
 // title for UI representation.
-type implementation struct {
+type Implementation struct {
 	// Intended for programmatic or logical use, but used as a display name in past
 	// specs or fallback (if title isn't present).
 	Name string `json:"name"`
