@@ -556,11 +556,15 @@ type TaskState string
 
 // Task state constants.
 const (
-	TaskStateSubmitted TaskState = "submitted"
-	TaskStateRunning   TaskState = "running"
-	TaskStateCompleted TaskState = "completed"
-	TaskStateFailed    TaskState = "failed"
-	TaskStateCanceled  TaskState = "canceled"
+	TaskStateSubmitted     TaskState = "submitted"
+	TaskStateRunning       TaskState = "running"
+	TaskStateInputRequired TaskState = "input_required"
+	TaskStateAuthRequired  TaskState = "auth_required"
+	TaskStateCompleted     TaskState = "completed"
+	TaskStateFailed        TaskState = "failed"
+	TaskStateCanceled      TaskState = "canceled"
+	TaskStateRejected      TaskState = "rejected"
+	TaskStateUnknown       TaskState = "unknown"
 )
 
 // TaskStatus represents the status of a task, wrapping the task state.
@@ -571,11 +575,24 @@ type TaskStatus struct {
 // Validate ensures the TaskStatus is valid.
 func (ts TaskStatus) Validate() error {
 	switch ts.State {
-	case TaskStateSubmitted, TaskStateRunning, TaskStateCompleted, TaskStateFailed, TaskStateCanceled:
+	case TaskStateSubmitted, TaskStateRunning, TaskStateInputRequired, TaskStateAuthRequired,
+		TaskStateCompleted, TaskStateFailed, TaskStateCanceled, TaskStateRejected, TaskStateUnknown:
 		return nil
 	default:
 		return fmt.Errorf("invalid task state: %s", ts.State)
 	}
+}
+
+// IsTerminal returns true if the task state is terminal (cannot be changed).
+func (ts TaskStatus) IsTerminal() bool {
+	return ts.State == TaskStateCompleted || ts.State == TaskStateFailed ||
+		ts.State == TaskStateCanceled || ts.State == TaskStateRejected
+}
+
+// IsTerminalTaskState returns true if the given TaskState is terminal.
+func IsTerminalTaskState(state TaskState) bool {
+	return state == TaskStateCompleted || state == TaskStateFailed ||
+		state == TaskStateCanceled || state == TaskStateRejected
 }
 
 // Message represents a message in the A2A protocol.
