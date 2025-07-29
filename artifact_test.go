@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/go-json-experiment/json"
-	"github.com/google/go-cmp/cmp"
+	gocmp "github.com/google/go-cmp/cmp"
 )
 
 func TestTextPart(t *testing.T) {
@@ -360,7 +360,7 @@ func TestNewDataArtifact(t *testing.T) {
 			}
 
 			if dataPart, ok := part.(*DataPart); ok {
-				if !cmp.Equal(dataPart.Data, tt.data) {
+				if !gocmp.Equal(dataPart.Data, tt.data) {
 					t.Errorf("NewDataArtifact() Part data = %v, want %v", dataPart.Data, tt.data)
 				}
 			} else {

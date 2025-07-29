@@ -10,7 +10,7 @@ import (
 	"context"
 
 	a2a "github.com/go-a2a/a2a-go"
-	"github.com/go-a2a/a2a-go/server"
+	server "github.com/go-a2a/a2a-go/_server"
 )
 
 // RequestHandler defines the interface for handling A2A protocol requests.

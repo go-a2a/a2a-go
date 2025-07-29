@@ -18,10 +18,15 @@ package transport
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/url"
 	"sync"
 
 	a2a "github.com/go-a2a/a2a-go"
 	"github.com/go-a2a/a2a-go/internal/jsonrpc2"
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
 type Client interface {
@@ -32,6 +37,13 @@ type Client interface {
 // clientMethodInfo maps from the RPC method name to client [methodInfo].
 var clientMethodInfo = map[a2a.Method]methodInfo{}
 
+type Invoker func(ctx context.Context, req *http.Request) (*http.Response, error)
+
+// RequestHandler is a custom HTTP request handler for a2a client.
+type RequestHandler interface {
+	Handle(ctx context.Context, invoker Invoker, req *http.Request) (*http.Response, error)
+}
+
 // ClientSession is a logical connection with an A2A server. Its
 // methods can be used to send requests or notifications to the server. Create
 // a session by calling [Client.Connect].
@@ -39,10 +51,12 @@ var clientMethodInfo = map[a2a.Method]methodInfo{}
 // Call [ClientSession.Close] to close the connection, or await client
 // termination with [ServerSession.Wait].
 type ClientSession struct {
-	Connection *jsonrpc2.Connection
-	Client     Client
-	A2AConn    Connection
-	mu         sync.Mutex
+	Connection     *jsonrpc2.Connection
+	Client         Client
+	A2AConn        Connection
+	HTTPClient     *http.Client
+	RequestHandler RequestHandler
+	mu             sync.Mutex
 }
 
 var _ Handler = (*ClientSession)(nil)
@@ -110,6 +124,45 @@ func (cs *ClientSession) receivingMethodHandler() methodHandler {
 
 // Conn implements [Session].
 func (cs *ClientSession) Conn() *jsonrpc2.Connection { return cs.Connection }
+
+func (cs *ClientSession) GetAgentCard(ctx context.Context, baseURL string) (*a2a.AgentCard, error) {
+	targetURL, err := url.JoinPath(baseURL, a2a.AgentCardWellKnownPath)
+	if err != nil {
+		return nil, fmt.Errorf("join %q and %q path: %w", baseURL, a2a.AgentCardWellKnownPath, err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// Set default headers
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	// Apply interceptors
+	invoker := func(ctx context.Context, req *http.Request) (*http.Response, error) {
+		req = req.WithContext(ctx)
+		return cs.HTTPClient.Do(req)
+	}
+	resp, err := cs.RequestHandler.Handle(ctx, invoker, req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch agent card: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch agent card from %s", targetURL)
+	}
+
+	var agentCard a2a.AgentCard
+	dec := jsontext.NewDecoder(resp.Body)
+	if err := json.UnmarshalDecode(dec, &agentCard, json.DefaultOptionsV2()); err != nil {
+		return nil, fmt.Errorf("decode agent card: %w", err)
+	}
+
+	return &agentCard, nil
+}
 
 func (cs *ClientSession) SendMessage(ctx context.Context, req *a2a.MessageSendParams) (a2a.MessageOrTask, error) {
 	return handleSend[a2a.MessageOrTask](ctx, cs, a2a.MethodMessageSend, orZero[a2a.Params](req))

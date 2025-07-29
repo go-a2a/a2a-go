@@ -676,7 +676,7 @@ func ToProtoProvider(provider *AgentProvider) (*a2a_v1.AgentProvider, error) {
 }
 
 // ToProtoProvider converts a Go []map[string][]string to a slice of [a2a_v1.Security].
-func ToProtoSecurity(security []map[string][]string) ([]*a2a_v1.Security, error) {
+func ToProtoSecurity(security []map[string]SecurityScopes) ([]*a2a_v1.Security, error) {
 	if security == nil {
 		return nil, nil
 	}
@@ -686,7 +686,7 @@ func ToProtoSecurity(security []map[string][]string) ([]*a2a_v1.Security, error)
 		schemes := make(map[string]*a2a_v1.StringList)
 		for k, v := range m {
 			schemes[k] = &a2a_v1.StringList{
-				List: v,
+				List: v.AsSlices(),
 			}
 		}
 		protoSecurities = append(protoSecurities, &a2a_v1.Security{
@@ -1428,17 +1428,17 @@ func FromProtoAgentCapabilities(protoCapabilities *a2a_v1.AgentCapabilities) (*A
 	return ac, nil
 }
 
-// FromProtoSecurity converts a slice of [a2a_v1.Security] to a Go []map[string][]string.
-func FromProtoSecurity(protoSecurity []*a2a_v1.Security) ([]map[string][]string, error) {
+// FromProtoSecurity converts a slice of [a2a_v1.Security] to a Go []map[string]SecurityScopes.
+func FromProtoSecurity(protoSecurity []*a2a_v1.Security) ([]map[string]SecurityScopes, error) {
 	if protoSecurity == nil {
 		return nil, nil
 	}
 
-	security := []map[string][]string{}
+	security := []map[string]SecurityScopes{}
 	for _, s := range protoSecurity {
-		m := map[string][]string{}
+		m := map[string]SecurityScopes{}
 		for k, v := range s.GetSchemes() {
-			m[k] = v.List
+			m[k] = NewSecurityScopes(v.List...)
 		}
 		security = append(security, m)
 	}

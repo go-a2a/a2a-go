@@ -9,7 +9,7 @@ import (
 	"log"
 
 	a2a "github.com/go-a2a/a2a-go"
-	"github.com/go-a2a/a2a-go/server"
+	server "github.com/go-a2a/a2a-go/_server"
 )
 
 // JSONRPCHandler provides JSON-RPC protocol adaptation for request handlers.

@@ -30,6 +30,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
+
+	"github.com/go-a2a/a2a-go"
 	"github.com/go-a2a/a2a-go/internal/jsonrpc2"
 	"github.com/go-a2a/a2a-go/internal/pool"
 )
@@ -59,7 +63,6 @@ func writeEvent(w io.Writer, evt Event) (int, error) {
 	fmt.Fprintf(b, "data: %s\n\n", string(evt.Data))
 
 	n, err := w.Write(b.Bytes())
-	b.Reset()
 	pool.Bytes.Put(b)
 
 	if f, ok := w.(http.Flusher); ok {
@@ -157,6 +160,45 @@ func scanEvents(r io.Reader) iter.Seq2[Event, error] {
 	}
 }
 
+type ServerHandler struct {
+	getServer func(request *http.Request) Server
+	h         *SSEHandler
+	opts      SSEHandlerOptions
+
+	sessions sync.Map // map[string]*SSEServerTransport
+}
+
+func NewServerHandler(getServer func(request *http.Request) Server, opts *SSEHandlerOptions) *ServerHandler {
+	h := &ServerHandler{
+		getServer: getServer,
+		h:         NewSSEHandler(getServer, opts),
+	}
+	if opts != nil {
+		h.opts = *opts
+	}
+
+	return h
+}
+
+func (h *ServerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		switch req.URL.Path {
+		case a2a.AgentCardWellKnownPath:
+			w.WriteHeader(http.StatusOK)
+			enc := jsontext.NewEncoder(w)
+			if err := json.MarshalEncode(enc, h.getServer(req).AgentCard()); err != nil {
+				http.Error(w, "marshal agent card", http.StatusInternalServerError)
+				return
+			}
+		default:
+			h.h.ServeHTTP(w, req)
+		}
+	case http.MethodPost:
+		h.h.ServeHTTP(w, req)
+	}
+}
+
 // This file implements support for SSE (HTTP with server-sent events)
 // transport server and client.
 // https://modelcontextprotocol.io/specification/2024-11-05/basic/transports
@@ -177,19 +219,19 @@ func scanEvents(r io.Reader) iter.Seq2[Event, error] {
 //  - Read reads off a message queue that is pushed to via POST requests.
 //  - Close causes the hanging GET to exit.
 
-// SSEHandler is an http.Handler that serves SSE-based MCP sessions as defined by
-// the [2024-11-05 version] of the MCP spec.
-//
-// [2024-11-05 version]: https://modelcontextprotocol.io/specification/2024-11-05/basic/transports
+// SSEHandler is an http.Handler that serves SSE-based A2A sessions.
 type SSEHandler struct {
 	getServer    func(request *http.Request) Server
 	onConnection func(*ServerSession) // for testing; must not block
+	opts         SSEHandlerOptions
 
-	mu       sync.Mutex
-	sessions map[string]*SSEServerTransport
+	sessions sync.Map // map[string]*SSEServerTransport
 }
 
-// NewSSEHandler returns a new [SSEHandler] that creates and manages MCP
+// SSEHandlerOptions provides options for the [NewSSEHandler] constructor.
+type SSEHandlerOptions struct{}
+
+// NewSSEHandler returns a new [SSEHandler] that creates and manages A2A
 // sessions created via incoming HTTP requests.
 //
 // Sessions are created when the client issues a GET request to the server,
@@ -202,36 +244,35 @@ type SSEHandler struct {
 // The getServer function may return a distinct [Server] for each new
 // request, or reuse an existing server. If it returns nil, the handler
 // will return a 400 Bad Request.
-//
-// TODO(rfindley): add options.
-func NewSSEHandler(getServer func(request *http.Request) Server) *SSEHandler {
-	return &SSEHandler{
+func NewSSEHandler(getServer func(request *http.Request) Server, opts *SSEHandlerOptions) *SSEHandler {
+	h := &SSEHandler{
 		getServer: getServer,
-		sessions:  make(map[string]*SSEServerTransport),
 	}
+	if opts != nil {
+		h.opts = *opts
+	}
+
+	return h
 }
 
 func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	sessionID := req.URL.Query().Get("sessionid")
-
 	// TODO: consider checking Content-Type here. For now, we are lax.
 
 	// For POST requests, the message body is a message to send to a session.
 	if req.Method == http.MethodPost {
+		sessionID := req.URL.Query().Get("sessionid")
 		// Look up the session.
 		if sessionID == "" {
 			http.Error(w, "sessionid must be provided", http.StatusBadRequest)
 			return
 		}
-		h.mu.Lock()
-		session := h.sessions[sessionID]
-		h.mu.Unlock()
-		if session == nil {
+		session, ok := h.sessions.Load(sessionID)
+		if !ok {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
 
-		session.ServeHTTP(w, req)
+		session.(*SSEServerTransport).ServeHTTP(w, req)
 		return
 	}
 
@@ -249,7 +290,7 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	sessionID = crand.Text()
+	sessionID := crand.Text()
 	endpoint, err := req.URL.Parse("?sessionid=" + sessionID)
 	if err != nil {
 		http.Error(w, "internal error: failed to create endpoint", http.StatusInternalServerError)
@@ -259,13 +300,9 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	transport := NewSSEServerTransport(endpoint.RequestURI(), w, sessionID)
 
 	// The session is terminated when the request exits.
-	h.mu.Lock()
-	h.sessions[sessionID] = transport
-	h.mu.Unlock()
+	h.sessions.Store(sessionID, transport)
 	defer func() {
-		h.mu.Lock()
-		delete(h.sessions, sessionID)
-		h.mu.Unlock()
+		h.sessions.Delete(sessionID)
 	}()
 
 	server := h.getServer(req)
@@ -343,6 +380,7 @@ func (t *SSEServerTransport) ServeHTTP(w http.ResponseWriter, req *http.Request)
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
+
 	// Optionally, we could just push the data onto a channel, and let the
 	// message fail to parse when it is read. This failure seems a bit more
 	// useful
@@ -351,6 +389,7 @@ func (t *SSEServerTransport) ServeHTTP(w http.ResponseWriter, req *http.Request)
 		http.Error(w, "failed to parse body", http.StatusBadRequest)
 		return
 	}
+
 	select {
 	case t.incoming <- msg:
 		w.WriteHeader(http.StatusAccepted)
@@ -417,7 +456,10 @@ func (s sseServerConn) Write(ctx context.Context, msg jsonrpc2.Message) error {
 		return io.EOF
 	}
 
-	_, err = writeEvent(s.t.w, Event{Name: "message", Data: data})
+	_, err = writeEvent(s.t.w, Event{
+		Name: "message",
+		Data: data,
+	})
 	return err
 }
 
@@ -463,12 +505,14 @@ func NewSSEClientTransport(baseURL string, opts *SSEClientTransportOptions) *SSE
 	if err != nil {
 		panic(fmt.Sprintf("invalid base url: %v", err))
 	}
+
 	t := &SSEClientTransport{
 		sseEndpoint: url,
 	}
 	if opts != nil {
 		t.opts = *opts
 	}
+
 	return t
 }
 
@@ -592,6 +636,7 @@ func (c *sseClientConn) Write(ctx context.Context, msg jsonrpc2.Message) error {
 	if c.isDone() {
 		return io.EOF
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.msgEndpoint.String(), bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -602,6 +647,7 @@ func (c *sseClientConn) Write(ctx context.Context, msg jsonrpc2.Message) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("failed to write: %s", resp.Status)
 	}

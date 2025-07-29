@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
+	gocmp "github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 )
 
@@ -54,12 +54,6 @@ func createTaskTestMessageWithIDs(role Role, text, taskID, contextID string) *Me
 	return msg
 }
 
-// Helper function to validate UUID format
-func isValidUUID(u string) bool {
-	_, err := uuid.Parse(u)
-	return err == nil
-}
-
 func TestNewTask(t *testing.T) {
 	t.Parallel()
 
@@ -73,7 +67,7 @@ func TestNewTask(t *testing.T) {
 			request: nil,
 			want:    nil,
 			wantErr: true,
-			errMsg:  "request cannot be nil",
+			errMsg:  "message cannot be nil",
 		},
 		"empty role": {
 			request: &Message{
@@ -238,7 +232,7 @@ func TestNewTask(t *testing.T) {
 					return
 				}
 				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("NewTask() error = %v, want error containing %v", err, tt.errMsg)
+					t.Errorf("NewTask() error = %q, want error containing %q", err, tt.errMsg)
 				}
 				return
 			}
@@ -314,7 +308,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: nil,
@@ -332,7 +326,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "",
 				ContextID: "",
 				Artifacts: nil,
@@ -356,7 +350,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: []*Artifact{
@@ -383,7 +377,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: nil,
@@ -412,7 +406,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: []*Artifact{
@@ -438,7 +432,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: []*Artifact{},
@@ -456,7 +450,7 @@ func TestCompletedTask(t *testing.T) {
 					State:     TaskStateCompleted,
 					Timestamp: now().Format(time.RFC3339),
 				},
-				Kind:      "",
+				Kind:      TaskEventKind,
 				ID:        "task-123",
 				ContextID: "context-456",
 				Artifacts: nil,
@@ -518,12 +512,12 @@ func TestCompletedTask(t *testing.T) {
 			// Use go-cmp for deep comparison if want is provided
 			if tt.want != nil {
 				// Compare without the generated UUID fields and other dynamic fields
-				opts := cmp.Options{
-					cmp.AllowUnexported(TextPart{}),
+				opts := gocmp.Options{
+					gocmp.AllowUnexported(TextPart{}),
 					// Ignore MessageID fields since they contain generated UUIDs
-					cmp.FilterPath(func(p cmp.Path) bool { return p.String() == "History.MessageID" }, cmp.Ignore()),
+					gocmp.FilterPath(func(p gocmp.Path) bool { return p.String() == "History.MessageID" }, gocmp.Ignore()),
 				}
-				if diff := cmp.Diff(tt.want, got, opts...); diff != "" {
+				if diff := gocmp.Diff(tt.want, got, opts...); diff != "" {
 					t.Errorf("CompletedTask() mismatch (-want +got):\n%s", diff)
 				}
 			}

@@ -31,6 +31,7 @@ import (
 // Servers expose server-side A2A features, which can serve one or more A2A
 // sessions by using [Server.Start] or [Server.Run].
 type Server struct {
+	agentCard *a2a.AgentCard
 	// fixed at creation
 	opts ServerOptions
 
@@ -70,12 +71,13 @@ type ServerOptions struct {
 // The first argument must not be nil.
 //
 // If non-nil, the provided options are used to configure the server.
-func NewServer(opts *ServerOptions) *Server {
+func NewServer(agentCard *a2a.AgentCard, opts *ServerOptions) *Server {
 	if opts == nil {
 		opts = new(ServerOptions)
 	}
 
 	return &Server{
+		agentCard:              agentCard,
 		opts:                   *opts,
 		sendingMethodHandler:   transport.DefaultSendingMethodHandler[*transport.ServerSession],
 		receivingMethodHandler: transport.DefaultReceivingMethodHandler[*transport.ServerSession],
@@ -111,7 +113,7 @@ func (s *Server) Run(ctx context.Context, t transport.Transport) error {
 	}
 }
 
-// bind implements the binder[*ServerSession] interface, so that Servers can
+// Bind implements the binder[*ServerSession] interface, so that Servers can
 // be connected using [connect].
 func (s *Server) Bind(conn *jsonrpc2.Connection) *transport.ServerSession {
 	ss := &transport.ServerSession{
@@ -124,7 +126,7 @@ func (s *Server) Bind(conn *jsonrpc2.Connection) *transport.ServerSession {
 	return ss
 }
 
-// disconnect implements the binder[*ServerSession] interface, so that
+// Disconnect implements the binder[*ServerSession] interface, so that
 // Servers can be connected using [connect].
 func (s *Server) Disconnect(cc *transport.ServerSession) {
 	s.mu.Lock()
@@ -144,16 +146,21 @@ func (s *Server) Connect(ctx context.Context, t transport.Transport) (*transport
 	return transport.Connect(ctx, t, s)
 }
 
-// SendingMethodHandler returns the current sending method handler.
+// AgentCard implements [transport.Server].
+func (s *Server) AgentCard() *a2a.AgentCard {
+	return s.agentCard
+}
+
+// ServerSendingMethodHandler returns the current sending method handler.
 //
-// SendingMethodHandler implements [transport.Client].
+// ServerSendingMethodHandler implements [transport.Server].
 func (s *Server) ServerSendingMethodHandler() any {
 	return s.sendingMethodHandler
 }
 
 // ReceivingMethodHandler returns the current receiving method handler.
 //
-// ReceivingMethodHandler implements [transport.Client].
+// ServerReceivingMethodHandler implements [transport.Server].
 func (s *Server) ServerReceivingMethodHandler() any {
 	return s.receivingMethodHandler
 }

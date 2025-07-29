@@ -18,8 +18,11 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/go-a2a/a2a-go/internal/jsonrpc2"
 	"github.com/go-a2a/a2a-go/transport"
@@ -28,6 +31,7 @@ import (
 // Client is an A2A client, which may be connected to an A2A server
 // using the [Client.Connect] method.
 type Client struct {
+	opts                   ClientOption
 	sessions               []*transport.ClientSession
 	sendingMethodHandler   transport.MethodHandler[*transport.ClientSession]
 	receivingMethodHandler transport.MethodHandler[*transport.ClientSession]
@@ -39,14 +43,55 @@ var (
 	_ transport.Binder[*transport.ClientSession] = (*Client)(nil)
 )
 
+// requestHandler is the HTTP request handler for a2a client.
+type requestHandler struct{}
+
+var _ transport.RequestHandler = (*requestHandler)(nil)
+
+// Handle is the HTTP request handler for a2a client.
+func (requestHandler) Handle(ctx context.Context, invoker transport.Invoker, req *http.Request) (resp *http.Response, err error) {
+	defer func() {
+		if err != nil && resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	resp, err = invoker(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("httpRequestHandler: http request failed: %w", err)
+	}
+
+	return resp, nil
+}
+
+type ClientOption struct {
+	HTTPClient     *http.Client
+	RequestHandler transport.RequestHandler
+}
+
 // NewClient creates a new [Client].
 //
 // Use [Client.Connect] to connect it to an A2A server.
-func NewClient() *Client {
+func NewClient(opts *ClientOption) *Client {
 	c := &Client{
 		sendingMethodHandler:   transport.DefaultSendingMethodHandler[*transport.ClientSession],
 		receivingMethodHandler: transport.DefaultReceivingMethodHandler[*transport.ClientSession],
+		opts: ClientOption{
+			HTTPClient: &http.Client{
+				Timeout: 30 * time.Second,
+			},
+			RequestHandler: &requestHandler{},
+		},
 	}
+	if opts != nil {
+		if hc := opts.HTTPClient; hc != nil {
+			c.opts.HTTPClient = hc
+		}
+		if h := opts.RequestHandler; h != nil {
+			c.opts.RequestHandler = h
+		}
+	}
+
 	return c
 }
 
@@ -54,12 +99,16 @@ func NewClient() *Client {
 // be connected using [connect].
 func (c *Client) Bind(conn *jsonrpc2.Connection) *transport.ClientSession {
 	cs := &transport.ClientSession{
-		Connection: conn,
-		Client:     c,
+		Connection:     conn,
+		Client:         c,
+		HTTPClient:     c.opts.HTTPClient,
+		RequestHandler: c.opts.RequestHandler,
 	}
+
 	c.mu.Lock()
 	c.sessions = append(c.sessions, cs)
 	c.mu.Unlock()
+
 	return cs
 }
 

@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	a2a "github.com/go-a2a/a2a-go"
-	"github.com/go-a2a/a2a-go/server"
+	server "github.com/go-a2a/a2a-go/_server"
 )
 
 // DefaultRequestHandler provides the default implementation of RequestHandler.

@@ -27,6 +27,7 @@ import (
 // Server provides methods for handling incoming requests from A2A clients.
 type Server interface {
 	Connect(ctx context.Context, t Transport) (*ServerSession, error)
+	AgentCard() *a2a.AgentCard
 	ServerSendingMethodHandler() any
 	ServerReceivingMethodHandler() any
 
