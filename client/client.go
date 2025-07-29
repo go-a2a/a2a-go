@@ -18,7 +18,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"slices"
 	"sync"
@@ -43,30 +42,10 @@ var (
 	_ transport.Binder[*transport.ClientSession] = (*Client)(nil)
 )
 
-// requestHandler is the HTTP request handler for a2a client.
-type requestHandler struct{}
-
-var _ transport.RequestHandler = (*requestHandler)(nil)
-
-// Handle is the HTTP request handler for a2a client.
-func (requestHandler) Handle(ctx context.Context, invoker transport.Invoker, req *http.Request) (resp *http.Response, err error) {
-	defer func() {
-		if err != nil && resp != nil {
-			_ = resp.Body.Close()
-		}
-	}()
-
-	resp, err = invoker(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("httpRequestHandler: http request failed: %w", err)
-	}
-
-	return resp, nil
-}
-
+// ClientOption holds options for creating a new [Client].
 type ClientOption struct {
-	HTTPClient     *http.Client
-	RequestHandler transport.RequestHandler
+	HTTPClient   *http.Client
+	Interceptors []transport.Interceptor
 }
 
 // NewClient creates a new [Client].
@@ -80,15 +59,14 @@ func NewClient(opts *ClientOption) *Client {
 			HTTPClient: &http.Client{
 				Timeout: 30 * time.Second,
 			},
-			RequestHandler: &requestHandler{},
 		},
 	}
 	if opts != nil {
 		if hc := opts.HTTPClient; hc != nil {
 			c.opts.HTTPClient = hc
 		}
-		if h := opts.RequestHandler; h != nil {
-			c.opts.RequestHandler = h
+		if ints := opts.Interceptors; len(ints) > 0 {
+			c.opts.Interceptors = slices.Clone(ints)
 		}
 	}
 
@@ -99,10 +77,10 @@ func NewClient(opts *ClientOption) *Client {
 // be connected using [connect].
 func (c *Client) Bind(conn *jsonrpc2.Connection) *transport.ClientSession {
 	cs := &transport.ClientSession{
-		Connection:     conn,
-		Client:         c,
-		HTTPClient:     c.opts.HTTPClient,
-		RequestHandler: c.opts.RequestHandler,
+		Connection:   conn,
+		Client:       c,
+		HTTPClient:   c.opts.HTTPClient,
+		Interceptors: c.opts.Interceptors,
 	}
 
 	c.mu.Lock()

@@ -17,17 +17,13 @@
 package transport
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	crand "crypto/rand"
-	"errors"
 	"fmt"
 	"io"
-	"iter"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 
 	"github.com/go-json-experiment/json"
@@ -35,167 +31,108 @@ import (
 
 	"github.com/go-a2a/a2a-go"
 	"github.com/go-a2a/a2a-go/internal/jsonrpc2"
-	"github.com/go-a2a/a2a-go/internal/pool"
 )
 
-// Event is a server-sent event.
-// See https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#fields.
-type Event struct {
-	Name string // the "event" field
-	ID   string // the "id" field
-	Data []byte // the "data" field
-}
+// GetServer represents a function that returns a [Server] for a given [*http.Request].
+type GetServer func(request *http.Request) Server
 
-// Empty reports whether the Event is empty.
-func (e Event) Empty() bool {
-	return e.Name == "" && e.ID == "" && len(e.Data) == 0
-}
-
-// writeEvent writes the event to w, and flushes.
-func writeEvent(w io.Writer, evt Event) (int, error) {
-	b := pool.Bytes.Get()
-	if evt.Name != "" {
-		fmt.Fprintf(b, "event: %s\n", evt.Name)
-	}
-	if evt.ID != "" {
-		fmt.Fprintf(b, "id: %s\n", evt.ID)
-	}
-	fmt.Fprintf(b, "data: %s\n\n", string(evt.Data))
-
-	n, err := w.Write(b.Bytes())
-	pool.Bytes.Put(b)
-
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-	return n, err
-}
-
-// scanEvents iterates SSE events in the given scanner. The iterated error is
-// terminal: if encountered, the stream is corrupt or broken and should no
-// longer be used.
-//
-// TODO(rfindley): consider a different API here that makes failure modes more
-// apparent.
-func scanEvents(r io.Reader) iter.Seq2[Event, error] {
-	scanner := bufio.NewScanner(r)
-	const maxTokenSize = 1 * 1024 * 1024 // 1 MiB max line size
-	scanner.Buffer(nil, maxTokenSize)
-
-	// TODO: investigate proper behavior when events are out of order, or have
-	// non-standard names.
-	var (
-		eventKey = []byte("event")
-		idKey    = []byte("id")
-		dataKey  = []byte("data")
-	)
-
-	return func(yield func(Event, error) bool) {
-		// iterate event from the wire.
-		// https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#examples
-		//
-		//  - `key: value` line records.
-		//  - Consecutive `data: ...` fields are joined with newlines.
-		//  - Unrecognized fields are ignored. Since we only care about 'event', 'id', and
-		//   'data', these are the only three we consider.
-		//  - Lines starting with ":" are ignored.
-		//  - Records are terminated with two consecutive newlines.
-		var (
-			evt     Event
-			dataBuf *bytes.Buffer // if non-nil, preceding field was also data
-		)
-		flushData := func() {
-			if dataBuf != nil {
-				evt.Data = dataBuf.Bytes()
-				dataBuf = nil
-			}
-		}
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				flushData()
-				// \n\n is the record delimiter
-				if !evt.Empty() && !yield(evt, nil) {
-					return
-				}
-				evt = Event{}
-				continue
-			}
-			before, after, found := bytes.Cut(line, []byte{':'})
-			if !found {
-				yield(Event{}, fmt.Errorf("malformed line in SSE stream: %q", string(line)))
-				return
-			}
-			if !bytes.Equal(before, dataKey) {
-				flushData()
-			}
-			switch {
-			case bytes.Equal(before, eventKey):
-				evt.Name = strings.TrimSpace(string(after))
-			case bytes.Equal(before, idKey):
-				evt.ID = strings.TrimSpace(string(after))
-			case bytes.Equal(before, dataKey):
-				data := bytes.TrimSpace(after)
-				if dataBuf != nil {
-					dataBuf.WriteByte('\n')
-					dataBuf.Write(data)
-				} else {
-					dataBuf = new(bytes.Buffer)
-					dataBuf.Write(data)
-				}
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			if errors.Is(err, bufio.ErrTooLong) {
-				err = fmt.Errorf("event exceeded max line length of %d", maxTokenSize)
-			}
-			if !yield(Event{}, err) {
-				return
-			}
-		}
-		flushData()
-		if !evt.Empty() {
-			yield(evt, nil)
-		}
-	}
-}
-
+// ServerHandler represents an HTTP handler that serves A2A sessions.
 type ServerHandler struct {
-	getServer func(request *http.Request) Server
-	h         *SSEHandler
-	opts      SSEHandlerOptions
-
-	sessions sync.Map // map[string]*SSEServerTransport
+	getServer  GetServer
+	sseHandler *SSEHandler
+	sessions   sync.Map // map[string]*SSEServerTransport
 }
 
-func NewServerHandler(getServer func(request *http.Request) Server, opts *SSEHandlerOptions) *ServerHandler {
+var _ http.Handler = (*ServerHandler)(nil)
+
+// NewServerHandler returns a new [ServerHandler] that serves A2A sessions.
+func NewServerHandler(getServer GetServer, opts *SSEHandlerOptions) *ServerHandler {
 	h := &ServerHandler{
-		getServer: getServer,
-		h:         NewSSEHandler(getServer, opts),
-	}
-	if opts != nil {
-		h.opts = *opts
+		getServer:  getServer,
+		sseHandler: NewSSEHandler(getServer, opts),
 	}
 
 	return h
 }
 
-func (h *ServerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	switch req.Method {
+// ServeHTTP implements [http.Handler].
+func (h *ServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("r.Method: %#v\n", r.Method)
+	switch r.Method {
 	case http.MethodGet:
-		switch req.URL.Path {
+		switch r.URL.Path {
 		case a2a.AgentCardWellKnownPath:
-			w.WriteHeader(http.StatusOK)
-			enc := jsontext.NewEncoder(w)
-			if err := json.MarshalEncode(enc, h.getServer(req).AgentCard()); err != nil {
-				http.Error(w, "marshal agent card", http.StatusInternalServerError)
-				return
-			}
+			h.handleAgentCard(w, r)
 		default:
-			h.h.ServeHTTP(w, req)
+			h.sseHandler.ServeHTTP(w, r)
 		}
+
 	case http.MethodPost:
-		h.h.ServeHTTP(w, req)
+		accept := r.Header.Get("Accept")
+		if accept == "" {
+			http.Error(w, "Accept header is empty", http.StatusBadRequest)
+			return
+		}
+		fmt.Printf("accept: %#v\n", accept)
+
+		switch accept {
+		case "application/json":
+			h.handleRequest(w, r)
+
+		case "text/event-stream":
+			// For POST requests and accept "text/event-stream", the message body is a message to send to a session.
+			h.sseHandler.handleSSE(w, r)
+		}
+	}
+}
+
+func (h *ServerHandler) handleAgentCard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	enc := jsontext.NewEncoder(w)
+	if err := json.MarshalEncode(enc, h.getServer(r).AgentCard()); err != nil {
+		http.Error(w, "marshal agent card", http.StatusInternalServerError)
+	}
+}
+
+func (h *ServerHandler) handleRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Read and parse the message.
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read body failed", http.StatusBadRequest)
+		return
+	}
+
+	// Optionally, we could just push the data onto a channel, and let the
+	// message fail to parse when it is read. This failure seems a bit more
+	// useful
+	msg, err := jsonrpc2.DecodeMessage(data)
+	if err != nil {
+		http.Error(w, "parse body failed", http.StatusBadRequest)
+		return
+	}
+
+	req := msg.(*jsonrpc2.Request)
+	switch a2a.Method(req.Method) {
+	case a2a.MethodMessageSend:
+		fmt.Printf("req: %#v\n", req)
+		// server := h.getServer(r)
+		// ss, err := server.Connect(ctx, newIOConn(w))
+		// if err != nil {
+		// 	http.Error(w, "parse body failed", http.StatusBadRequest)
+		// 	return
+		// }
+
+		var params a2a.MessageSendParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			http.Error(w, "parse body failed", http.StatusBadRequest)
+			return
+		}
+		// resp, err := server.SendMessage(r.Context(), ss, &params)
+		response, _ := jsonrpc2.NewResponse(req.ID, &params, err)
+		data, _ := jsonrpc2.EncodeMessage(response)
+		w.Write(data)
 	}
 }
 
@@ -228,6 +165,8 @@ type SSEHandler struct {
 	sessions sync.Map // map[string]*SSEServerTransport
 }
 
+var _ http.Handler = (*SSEHandler)(nil)
+
 // SSEHandlerOptions provides options for the [NewSSEHandler] constructor.
 type SSEHandlerOptions struct{}
 
@@ -255,28 +194,25 @@ func NewSSEHandler(getServer func(request *http.Request) Server, opts *SSEHandle
 	return h
 }
 
-func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// TODO: consider checking Content-Type here. For now, we are lax.
-
-	// For POST requests, the message body is a message to send to a session.
-	if req.Method == http.MethodPost {
-		sessionID := req.URL.Query().Get("sessionid")
-		// Look up the session.
-		if sessionID == "" {
-			http.Error(w, "sessionid must be provided", http.StatusBadRequest)
-			return
-		}
-		session, ok := h.sessions.Load(sessionID)
-		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-
-		session.(*SSEServerTransport).ServeHTTP(w, req)
+func (h *SSEHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("sessionid")
+	// Look up the session.
+	if sessionID == "" {
+		http.Error(w, "sessionid must be provided", http.StatusBadRequest)
+		return
+	}
+	session, ok := h.sessions.Load(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	if req.Method != http.MethodGet {
+	session.(*SSEServerTransport).ServeHTTP(w, r)
+}
+
+// ServeHTTP implements [http.Handler].
+func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		http.Error(w, "invalid method", http.StatusMethodNotAllowed)
 		return
 	}
@@ -291,7 +227,7 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	sessionID := crand.Text()
-	endpoint, err := req.URL.Parse("?sessionid=" + sessionID)
+	endpoint, err := r.URL.Parse("?sessionid=" + sessionID)
 	if err != nil {
 		http.Error(w, "internal error: failed to create endpoint", http.StatusInternalServerError)
 		return
@@ -305,13 +241,13 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.sessions.Delete(sessionID)
 	}()
 
-	server := h.getServer(req)
+	server := h.getServer(r)
 	if server == nil {
 		// The getServer argument to NewSSEHandler returned nil.
 		http.Error(w, "no server available", http.StatusBadRequest)
 		return
 	}
-	ss, err := server.Connect(req.Context(), transport)
+	ss, err := server.Connect(r.Context(), transport)
 	if err != nil {
 		http.Error(w, "connection failed", http.StatusInternalServerError)
 		return
@@ -322,7 +258,7 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer ss.Close() // close the transport when the GET exits
 
 	select {
-	case <-req.Context().Done():
+	case <-r.Context().Done():
 	case <-transport.done:
 	}
 }
@@ -351,6 +287,8 @@ type SSEServerTransport struct {
 	done   chan struct{}       // closed when the connection is closed
 }
 
+var _ Transport = (*SSEServerTransport)(nil)
+
 // NewSSEServerTransport creates a new SSE transport for the given messages
 // endpoint, and hanging GET response.
 //
@@ -373,11 +311,13 @@ func NewSSEServerTransport(endpoint string, w http.ResponseWriter, sessionID str
 }
 
 // ServeHTTP handles POST requests to the transport endpoint.
-func (t *SSEServerTransport) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+//
+// ServeHTTP implements [http.Handler].
+func (t *SSEServerTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Read and parse the message.
-	data, err := io.ReadAll(req.Body)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "read body failed", http.StatusBadRequest)
 		return
 	}
 
@@ -386,7 +326,7 @@ func (t *SSEServerTransport) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	// useful
 	msg, err := jsonrpc2.DecodeMessage(data)
 	if err != nil {
-		http.Error(w, "failed to parse body", http.StatusBadRequest)
+		http.Error(w, "parse body failed", http.StatusBadRequest)
 		return
 	}
 
@@ -410,18 +350,21 @@ func (t *SSEServerTransport) Connect(context.Context) (Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return sseServerConn{t}, nil
 }
 
 // sseServerConn implements the [Connection] interface for a single [SSEServerTransport].
-// It hides the Connection interface from the SSEServerTransport API.
+// It hides the Connection interface from the [SSEServerTransport] API.
 type sseServerConn struct {
 	t *SSEServerTransport
 }
 
+var _ Connection = (*sseServerConn)(nil)
+
 func (s sseServerConn) SessionID() string { return s.t.sessionID }
 
-// Read implements jsonrpc2.Reader.
+// Read implements [jsonrpc2.Reader].
 func (s sseServerConn) Read(ctx context.Context) (jsonrpc2.Message, error) {
 	select {
 	case <-ctx.Done():
@@ -435,7 +378,7 @@ func (s sseServerConn) Read(ctx context.Context) (jsonrpc2.Message, error) {
 	}
 }
 
-// Write implements jsonrpc2.Writer.
+// Write implements [jsonrpc2.Writer].
 func (s sseServerConn) Write(ctx context.Context, msg jsonrpc2.Message) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -488,6 +431,8 @@ type SSEClientTransport struct {
 	opts        SSEClientTransportOptions
 }
 
+var _ Transport = (*SSEClientTransport)(nil)
+
 // SSEClientTransportOptions provides options for the [NewSSEClientTransport]
 // constructor.
 type SSEClientTransportOptions struct {
@@ -524,9 +469,8 @@ func (c *SSEClientTransport) Connect(ctx context.Context) (Connection, error) {
 	}
 	httpClient := c.opts.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{}
 	}
-	req.Header.Set("Accept", "text/event-stream")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -598,6 +542,8 @@ type sseClientConn struct {
 	done   chan struct{} // closed when the stream is closed
 }
 
+var _ Connection = (*sseClientConn)(nil)
+
 // TODO(jba): get the session ID. (Not urgent because SSE transports have been removed from the spec.)
 func (c *sseClientConn) SessionID() string { return "" }
 
@@ -642,6 +588,7 @@ func (c *sseClientConn) Write(ctx context.Context, msg jsonrpc2.Message) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream") // request SSE
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err

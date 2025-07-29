@@ -60,6 +60,7 @@ type ServerOptions struct {
 	ListTasksPushNotificationConfigHandler   func(ctx context.Context, ss *transport.ServerSession, params *a2a.ListTaskPushNotificationConfigParams) (a2a.TaskPushNotificationConfigs, error)
 	DeleteTasksPushNotificationConfigHandler func(ctx context.Context, ss *transport.ServerSession, params *a2a.DeleteTaskPushNotificationConfigParams) (*a2a.EmptyResult, error)
 	ResubscribeTasksHandler                  func(ctx context.Context, ss *transport.ServerSession, params *a2a.TaskIDParams) (a2a.SendStreamingMessageResponse, error)
+	AuthenticatedExtendedCardHandler         func(ctx context.Context, ss *transport.ServerSession, params *a2a.EmptyParams) (*a2a.AgentCard, error)
 }
 
 // NewServer creates a new A2A server. The resulting server has no features:
@@ -258,4 +259,11 @@ func (s *Server) ResubscribeTasks(ctx context.Context, ss *transport.ServerSessi
 		return nil, jsonrpc2.ErrMethodNotFound
 	}
 	return s.opts.ResubscribeTasksHandler(ctx, ss, params)
+}
+
+func (s *Server) AuthenticatedExtendedCard(ctx context.Context, ss *transport.ServerSession, params *a2a.EmptyParams) (*a2a.AgentCard, error) {
+	if s.opts.AuthenticatedExtendedCardHandler == nil {
+		return nil, jsonrpc2.ErrMethodNotFound
+	}
+	return s.opts.AuthenticatedExtendedCardHandler(ctx, ss, params)
 }
