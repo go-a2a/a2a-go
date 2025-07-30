@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 
 	a2a "github.com/go-a2a/a2a-go"
@@ -44,17 +45,16 @@ type Interceptor func(ctx context.Context, req *http.Request, invoker Invoker) (
 type Invoker func(ctx context.Context, req *http.Request) (*http.Response, error)
 
 // chainInterceptors chains multiple interceptors together.
-func chainInterceptors(interceptors []Interceptor, invoker Invoker) Invoker {
+func chainInterceptors(invoker Invoker, interceptors ...Interceptor) Invoker {
 	if len(interceptors) == 0 {
 		return invoker
 	}
 
 	// Build the chain from right to left
-	for i := len(interceptors) - 1; i >= 0; i-- {
-		interceptor := interceptors[i]
+	for _, int := range slices.Backward(interceptors) {
 		next := invoker
 		invoker = func(ctx context.Context, req *http.Request) (*http.Response, error) {
-			return interceptor(ctx, req, next)
+			return int(ctx, req, next)
 		}
 	}
 
@@ -163,7 +163,7 @@ func (cs *ClientSession) GetAgentCard(ctx context.Context, baseURL string) (*a2a
 		req = req.WithContext(ctx)
 		return cs.HTTPClient.Do(req)
 	}
-	invoker = chainInterceptors(cs.Interceptors, invoker)
+	invoker = chainInterceptors(invoker, cs.Interceptors...)
 
 	resp, err := invoker(ctx, req)
 	if err != nil {

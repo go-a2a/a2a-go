@@ -1,5 +1,862 @@
 # https://a2a-protocol.org/latest/ llms-full.txt
 
+<|firecrawl-page-1-lllmstxt|>
+## Understanding A2A Protocol
+[Skip to content](https://a2a-protocol.org/latest/topics/what-is-a2a/#what-is-a2a)
+
+# What is A2A? [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#what-is-a2a "Permanent link")
+
+The Agent2Agent (A2A) Protocol is an open standard designed to solve a fundamental challenge in the rapidly evolving landscape of artificial intelligence: **how do AI agents, built by different teams, using different technologies, and owned by different organizations, communicate and collaborate effectively?**
+
+As AI agents become more specialized and capable, the need for them to work together on complex tasks increases. Imagine a user asking their primary AI assistant to plan an international trip. This single request might involve coordinating the capabilities of several specialized agents:
+
+1. An agent for flight bookings.
+2. Another agent for hotel reservations.
+3. A third for local tour recommendations and bookings.
+4. A fourth to handle currency conversion and travel advisories.
+
+Without a common communication protocol, integrating these diverse agents into a cohesive user experience is a significant engineering hurdle. Each integration would likely be a custom, point-to-point solution, making the system difficult to scale, maintain, and extend.
+
+## The A2A Solution [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#the-a2a-solution "Permanent link")
+
+A2A provides a standardized way for these independent, often "opaque" (black-box) agentic systems to interact. It defines:
+
+- **A common transport and format:** JSON-RPC 2.0 over HTTP(S) for how messages are structured and transmitted.
+- **Discovery mechanisms (Agent Cards):** How agents can advertise their capabilities and be found by other agents.
+- **Task management workflows:** How collaborative tasks are initiated, progressed, and completed. This includes support for tasks that may be long-running or require multiple turns of interaction.
+- **Support for various data modalities:** How agents exchange not just text, but also files, structured data (like forms), and potentially other rich media.
+- **Core principles for security and asynchronicity:** Guidelines for secure communication and handling tasks that might take significant time or involve human-in-the-loop processes.
+
+## Key Design Principles of A2A [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#key-design-principles-of-a2a "Permanent link")
+
+The development of A2A is guided by several core principles:
+
+- **Simplicity:** Leverage existing, well-understood standards like HTTP, JSON-RPC, and Server-Sent Events (SSE) where possible, rather than reinventing the wheel.
+- **Enterprise Readiness:** Address critical enterprise needs such as authentication, authorization, security, privacy, tracing, and monitoring from the outset by aligning with standard web practices.
+- **Asynchronous First:** Natively support long-running tasks and scenarios where agents or users might not be continuously connected, through mechanisms like streaming and push notifications.
+- **Modality Agnostic:** Allow agents to communicate using a variety of content types, enabling rich and flexible interactions beyond plain text.
+- **Opaque Execution:** Enable collaboration without requiring agents to expose their internal logic, memory, or proprietary tools. Agents interact based on declared capabilities and exchanged context, preserving intellectual property and enhancing security.
+
+## Benefits of Using A2A [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#benefits-of-using-a2a "Permanent link")
+
+Adopting A2A can lead to significant advantages:
+
+- **Increased Interoperability:** Break down silos between different AI agent ecosystems, allowing agents from various vendors and frameworks to work together.
+- **Enhanced Agent Capabilities:** Allow developers to create more sophisticated applications by composing the strengths of multiple specialized agents.
+- **Reduced Integration Complexity:** Standardize the "how" of agent communication, allowing teams to focus on the "what" – the value their agents provide.
+- **Fostering Innovation:** Encourage the development of a richer ecosystem of specialized agents that can readily plug into larger collaborative workflows.
+- **Future-Proofing:** Provide a flexible framework that can adapt as agent technologies continue to evolve.
+
+By establishing common ground for agent-to-agent communication, A2A aims to accelerate the adoption and utility of AI agents across diverse industries and applications, paving the way for more powerful and collaborative AI systems.
+
+## A2A Request Lifecycle [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#a2a-request-lifecycle "Permanent link")
+
+Next, learn about the [Key Concepts](https://a2a-protocol.org/latest/topics/key-concepts/) that form the foundation of the A2A protocol.
+
+<|firecrawl-page-2-lllmstxt|>
+## Agent Discovery in A2A
+[Skip to content](https://a2a-protocol.org/latest/topics/agent-discovery/#agent-discovery-in-a2a)
+
+# Agent Discovery in A2A [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#agent-discovery-in-a2a "Permanent link")
+
+For AI agents to collaborate using the Agent2Agent (A2A) protocol, they first need to find each other and understand what capabilities the other agents offer. A2A standardizes the format of an agent's self-description through the **[Agent Card](https://a2a-protocol.org/latest/specification/#5-agent-discovery-the-agent-card)**. However, the methods for discovering these Agent Cards can vary depending on the environment and requirements.
+
+## The Role of the Agent Card [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#the-role-of-the-agent-card "Permanent link")
+
+The Agent Card is a JSON document that serves as a digital "business card" for an A2A Server (the remote agent). It is crucial for discovery and initiating interaction. Key information typically included in an Agent Card:
+
+- **Identity:** `name`, `description`, `provider` information.
+- **Service Endpoint:** The `url` where the A2A service can be reached.
+- **A2A Capabilities:** Supported protocol features like `streaming` or `pushNotifications`.
+- **Authentication:** Required authentication `schemes` (e.g., "Bearer", "OAuth2") to interact with the agent.
+- **Skills:** A list of specific tasks or functions the agent can perform ( `AgentSkill` objects), including their `id`, `name`, `description`, `inputModes`, `outputModes`, and `examples`.
+
+Client agents parse the Agent Card to determine if a remote agent is suitable for a given task, how to structure requests for its skills, and how to communicate with it securely.
+
+## Discovery Strategies [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#discovery-strategies "Permanent link")
+
+Here are common strategies for how a client agent might discover the Agent Card of a remote agent:
+
+### 1\. Well-Known URI [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#1-well-known-uri "Permanent link")
+
+This is a recommended approach for public agents or agents intended for broad discoverability within a specific domain.
+
+- **Mechanism:** A2A Servers host their Agent Card at a standardized, "well-known" path on their domain.
+- **Standard Path:** `https://{agent-server-domain}/.well-known/agent-card.json` (following the principles of [RFC 8615](https://www.ietf.org/rfc/rfc8615.txt) for well-known URIs).
+- **Process:**
+1. A client agent knows or programmatically discovers the domain of a potential A2A Server (e.g., `smart-thermostat.example.com`).
+2. The client performs an HTTP `GET` request to `https://smart-thermostat.example.com/.well-known/agent-card.json`.
+3. If the Agent Card exists and is accessible, the server returns it as a JSON response.
+- **Advantages:** Simple, standardized, and enables automated discovery by crawlers or systems that can resolve domains. Effectively reduces the discovery problem to "find the agent's domain."
+- **Considerations:** Best suited for agents intended for open discovery or discovery within an organization that controls the domain. The endpoint serving the Agent Card may itself require authentication if the card contains sensitive information.
+
+### 2\. Curated Registries (Catalog-Based Discovery) [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#2-curated-registries-catalog-based-discovery "Permanent link")
+
+For enterprise environments, marketplaces, or specialized ecosystems, Agent Cards can be published to and discovered via a central registry or catalog.
+
+- **Mechanism:** An intermediary service (the registry) maintains a collection of Agent Cards. Clients query this registry to find agents based on various criteria (e.g., skills offered, tags, provider name, desired capabilities).
+- **Process:**
+1. A2A Servers (or their administrators) register their Agent Cards with the registry service. The mechanism for this registration is outside the scope of the A2A protocol itself.
+2. Client agents query the registry's API (e.g., "find agents with 'image-generation' skill that support streaming").
+3. The registry returns a list of matching Agent Cards or references to them.
+- **Advantages:**
+  - Centralized management, curation, and governance of available agents.
+  - Facilitates discovery based on functional capabilities rather than just domain names.
+  - Can implement access controls, policies, and trust mechanisms at the registry level.
+  - Enables scenarios like company-specific or team-specific agent catalogs, or public marketplaces of A2A-compliant agents.
+- **Considerations:** Requires an additional registry service. The A2A protocol does not currently define a standard API for such registries, though this is an area of potential future exploration and community standardization.
+
+### 3\. Direct Configuration / Private Discovery [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#3-direct-configuration-private-discovery "Permanent link")
+
+In many scenarios, especially within tightly coupled systems, for private agents, or during development and testing, clients might be directly configured with Agent Card information or a URL to fetch it.
+
+- **Mechanism:** The client application has hardcoded Agent Card details, reads them from a local configuration file, receives them through an environment variable, or fetches them from a private, proprietary API endpoint known to the client.
+- **Process:** This is highly specific to the application's deployment and configuration strategy.
+- **Advantages:** Simple and effective for known, static relationships between agents or when dynamic discovery is not a requirement.
+- **Considerations:** Less flexible for discovering new or updated agents dynamically. Changes to the remote agent's card might require re-configuration of the client. Proprietary API-based discovery is not standardized by A2A.
+
+## Securing Agent Cards [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#securing-agent-cards "Permanent link")
+
+Agent Cards themselves can sometimes contain information that should be protected, such as:
+
+- The `url` of an internal-only or restricted-access agent.
+- Details in the `authentication.credentials` field if it's used for scheme-specific, non-secret information (e.g., an OAuth token URL). Storing actual plaintext secrets in an Agent Card is **strongly discouraged**.
+- Descriptions of sensitive or internal skills.
+
+**Protection Mechanisms:**
+
+- **Access Control on the Endpoint:** The HTTP endpoint serving the Agent Card (whether it's the `/.well-known/agent-card.json` path, a registry API, or a custom URL) should be secured using standard web practices if the card is not intended for public, unauthenticated access.
+  - **mTLS:** Require mutual TLS for client authentication if appropriate for the trust model.
+  - **Network Restrictions:** Limit access to specific IP ranges, VPCs, or private networks.
+  - **Authentication:** Require standard HTTP authentication (e.g., OAuth 2.0 Bearer token, API Key) to access the Agent Card itself.
+- **Selective Disclosure by Registries:** Agent registries can implement logic to return different Agent Cards or varying levels of detail based on the authenticated client's identity and permissions. For example, a public query might return a limited card, while an authenticated partner query might receive a card with more details.
+
+It's crucial to remember that if an Agent Card were to contain sensitive data (again, **not recommended** for secrets), the card itself **must never** be available without strong authentication and authorization. The A2A protocol encourages authentication schemes where the client obtains dynamic credentials out-of-band, rather than relying on static secrets embedded in the Agent Card.
+
+## Future Considerations [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#future-considerations "Permanent link")
+
+The A2A community may explore standardizing aspects of registry interactions or more advanced, semantic discovery protocols in the future. Feedback and contributions in this area are welcome to enhance the discoverability and interoperability of A2A agents.
+
+<|firecrawl-page-3-lllmstxt|>
+## Next Steps in A2A
+[Skip to content](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/#next-steps)
+
+# Next Steps [¶](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/\#next-steps "Permanent link")
+
+Congratulations on completing the A2A Python SDK Tutorial! You've learned how to:
+
+- Set up your environment for A2A development.
+- Define Agent Skills and Agent Cards using the SDK's types.
+- Implement a basic HelloWorld A2A server and client.
+- Understand and implement streaming capabilities.
+- Integrate a more complex agent using LangGraph, demonstrating task state management and tool use.
+
+You now have a solid foundation for building and integrating your own A2A-compliant agents.
+
+## Where to Go From Here? [¶](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/\#where-to-go-from-here "Permanent link")
+
+Here are some ideas and resources to continue your A2A journey:
+
+- **Explore Other Examples:**
+  - Check out the other examples in the `a2a-samples/samples/` directory in the [A2A GitHub repository](https://github.com/a2aproject/a2a-samples/tree/main/samples) for more complex agent integrations and features.
+  - The main A2A repository also has [samples for other languages and frameworks](https://github.com/a2aproject/A2A/tree/main/samples).
+- **Deepen Your Protocol Understanding:**
+  - 📚 Read the complete [A2A Protocol Documentation site](https://google.github.io/A2A/) for a comprehensive overview.
+  - 📝 Review the detailed [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/) to understand the nuances of all data structures and RPC methods.
+- **Review Key A2A Topics:**
+  - [A2A and MCP](https://a2a-protocol.org/latest/topics/a2a-and-mcp/): Understand how A2A complements the Model Context Protocol for tool usage.
+  - [Enterprise-Ready Features](https://a2a-protocol.org/latest/topics/enterprise-ready/): Learn about security, observability, and other enterprise considerations.
+  - [Streaming & Asynchronous Operations](https://a2a-protocol.org/latest/topics/streaming-and-async/): Get more details on SSE and push notifications.
+  - [Agent Discovery](https://a2a-protocol.org/latest/topics/agent-discovery/): Explore different ways agents can find each other.
+- **Build Your Own Agent:**
+  - Try creating a new A2A agent using your favorite Python agent framework (like LangChain, CrewAI, AutoGen, Semantic Kernel, or a custom solution).
+  - Implement the `a2a.server.AgentExecutor` interface to bridge your agent's logic with the A2A protocol.
+  - Think about what unique skills your agent could offer and how its Agent Card would represent them.
+- **Experiment with Advanced Features:**
+  - Implement robust task management with a persistent `TaskStore` if your agent handles long-running or multi-session tasks.
+  - Explore implementing push notifications if your agent's tasks are very long-lived.
+  - Consider more complex input and output modalities (e.g., handling file uploads/downloads, or structured data via `DataPart`).
+- **Contribute to the A2A Community:**
+  - Join the discussions on the [A2A GitHub Discussions page](https://github.com/a2aproject/A2A/discussions).
+  - Report issues or suggest improvements via [GitHub Issues](https://github.com/a2aproject/A2A/issues).
+  - Consider contributing code, examples, or documentation. See the [CONTRIBUTING.md](https://github.com/a2aproject/A2A/blob/main/CONTRIBUTING.md) guide.
+
+The A2A protocol aims to foster an ecosystem of interoperable AI agents. By building and sharing A2A-compliant agents, you can be a part of this exciting development!
+
+<|firecrawl-page-4-lllmstxt|>
+## Agent Skills and Card
+[Skip to content](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/#3-agent-skills-agent-card)
+
+# 3\. Agent Skills & Agent Card [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#3-agent-skills-agent-card "Permanent link")
+
+Before an A2A agent can do anything, it needs to define what it _can_ do (its skills) and how other agents or clients can find out about these capabilities (its Agent Card).
+
+We'll use the `helloworld` example located in [`a2a-samples/samples/python/agents/helloworld/`](https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/helloworld).
+
+## Agent Skills [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#agent-skills "Permanent link")
+
+An **Agent Skill** describes a specific capability or function the agent can perform. It's a building block that tells clients what kinds of tasks the agent is good for.
+
+Key attributes of an `AgentSkill` (defined in `a2a.types`):
+
+- `id`: A unique identifier for the skill.
+- `name`: A human-readable name.
+- `description`: A more detailed explanation of what the skill does.
+- `tags`: Keywords for categorization and discovery.
+- `examples`: Sample prompts or use cases.
+- `inputModes` / `outputModes`: Supported Media Types for input and output (e.g., "text/plain", "application/json").
+
+In `__main__.py`, you can see how a skill for the Helloworld agent is defined:
+
+```md-code__content
+skill = AgentSkill(
+    id='hello_world',
+    name='Returns hello world',
+    description='just returns hello world',
+    tags=['hello world'],
+    examples=['hi', 'hello world'],
+)
+
+```
+
+This skill is very simple: it's named "Returns hello world" and primarily deals with text.
+
+## Agent Card [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#agent-card "Permanent link")
+
+The **Agent Card** is a JSON document that an A2A Server makes available, typically at a `.well-known/agent-card.json` endpoint. It's like a digital business card for the agent.
+
+Key attributes of an `AgentCard` (defined in `a2a.types`):
+
+- `name`, `description`, `version`: Basic identity information.
+- `url`: The endpoint where the A2A service can be reached.
+- `capabilities`: Specifies supported A2A features like `streaming` or `pushNotifications`.
+- `defaultInputModes` / `defaultOutputModes`: Default Media Types for the agent.
+- `skills`: A list of `AgentSkill` objects that the agent offers.
+
+The `helloworld` example defines its Agent Card like this:
+
+```md-code__content
+# This will be the public-facing agent card
+public_agent_card = AgentCard(
+    name='Hello World Agent',
+    description='Just a hello world agent',
+    url='http://localhost:9999/',
+    version='1.0.0',
+    default_input_modes=['text'],
+    default_output_modes=['text'],
+    capabilities=AgentCapabilities(streaming=True),
+    skills=[skill],  # Only the basic skill for the public card
+    supports_authenticated_extended_card=True,
+)
+
+```
+
+This card tells us the agent is named "Hello World Agent", runs at `http://localhost:9999/`, supports text interactions, and has the `hello_world` skill. It also indicates public authentication, meaning no specific credentials are required.
+
+Understanding the Agent Card is crucial because it's how a client discovers an agent and learns how to interact with it.
+
+<|firecrawl-page-5-lllmstxt|>
+## A2A Protocol Roadmap
+[Skip to content](https://a2a-protocol.org/latest/roadmap/#a2a-protocol-roadmap)
+
+# A2A protocol roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#a2a-protocol-roadmap "Permanent link")
+
+**Last updated:** Jul 16, 2025
+
+## Near-term initiatives [¶](https://a2a-protocol.org/latest/roadmap/\#near-term-initiatives "Permanent link")
+
+- Release `0.3` version of the protocol which we intend to keep supported and without breaking changes for a significant amount of time with backward compatibility of the SDKs starting at version `0.3`. As part of this release there are a few known breaking changes including:
+  - Update the `/.well-known/agent.json` path for hosting Agent Cards to `/.well-known/agent-card.json` based on feedback from IANA.
+  - Refactor class fields to be more Pythonic and adopt `snake_case`. [PR 199](https://github.com/a2aproject/a2a-python/pull/199)
+- Solidify the support for [A2A extensions](https://a2a-protocol.org/latest/topics/extensions/) with SDK support (starting with the Python SDK) and publishing sample extensions.
+- Introduce support for signed Agent Cards [Discussion 199](https://github.com/a2aproject/A2A/discussions/199#discussioncomment-13770576) to allow verifying the integrity of Agent Card content.
+- Enhance the client side support in SDK (starting with Python) to expose ready-to-use A2A clients, streamlined auth handling and improved handling of tasks.
+
+To review recent protocol changes see [Release Notes](https://github.com/a2aproject/A2A/releases).
+
+## Longer term (3-6 month period) roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#longer-term-3-6-month-period-roadmap "Permanent link")
+
+### Governance [¶](https://a2a-protocol.org/latest/roadmap/\#governance "Permanent link")
+
+The protocol has been [donated](https://www.linuxfoundation.org/press/linux-foundation-launches-the-agent2agent-protocol-project-to-enable-secure-intelligent-communication-between-ai-agents) to the Linux Foundation. The TSC is working on implementing a governance structure that prioritizes community-led development with standardized processes for contributing to the specification, SDKs and tooling. As part of the effort there will be dedicated working groups created for specific areas of the protocol.
+
+### Agent Registry [¶](https://a2a-protocol.org/latest/roadmap/\#agent-registry "Permanent link")
+
+Agent Registry enables the discovery of agents and is a critical component of a multi-agent system. There is an active and ongoing discussion in the community around the latest [Discussion 741](https://github.com/a2aproject/A2A/discussions/741).
+
+### Validation [¶](https://a2a-protocol.org/latest/roadmap/\#validation "Permanent link")
+
+As the A2A ecosystem matures, it becomes critical for the A2A community to have tools to validate their agents. The community has launched two efforts to help with validation which the group will continue to enhance in the coming months. Learn more about [A2A Inspector](https://github.com/a2aproject/a2a-inspector) and the [A2A Protocol Technology Compatibility Kit](https://github.com/a2aproject/a2a-tck) (TCK).
+
+### SDKs [¶](https://a2a-protocol.org/latest/roadmap/\#sdks "Permanent link")
+
+A2A Project currently hosts SDKs in four languages (Python, JS, Java, .NET) and contributors are adding more including Go (in progress).
+
+### Community best practices [¶](https://a2a-protocol.org/latest/roadmap/\#community-best-practices "Permanent link")
+
+As companies and individuals deploy A2A systems at an increasing pace, we are looking to accelerate the learning of the community by collecting and sharing the best practices and success stories that A2A enabled.
+
+<|firecrawl-page-6-lllmstxt|>
+## A2A Protocol Sitemap
+https://a2a-protocol.org/dev/2025-07-29https://a2a-protocol.org/dev/community/2025-07-29https://a2a-protocol.org/dev/partners/2025-07-29https://a2a-protocol.org/dev/roadmap/2025-07-29https://a2a-protocol.org/dev/specification/2025-07-29https://a2a-protocol.org/dev/sdk/python/2025-07-29https://a2a-protocol.org/dev/topics/a2a-and-mcp/2025-07-29https://a2a-protocol.org/dev/topics/agent-discovery/2025-07-29https://a2a-protocol.org/dev/topics/enterprise-ready/2025-07-29https://a2a-protocol.org/dev/topics/extensions/2025-07-29https://a2a-protocol.org/dev/topics/key-concepts/2025-07-29https://a2a-protocol.org/dev/topics/life-of-a-task/2025-07-29https://a2a-protocol.org/dev/topics/streaming-and-async/2025-07-29https://a2a-protocol.org/dev/topics/what-is-a2a/2025-07-29https://a2a-protocol.org/dev/tutorials/python/1-introduction/2025-07-29https://a2a-protocol.org/dev/tutorials/python/2-setup/2025-07-29https://a2a-protocol.org/dev/tutorials/python/3-agent-skills-and-card/2025-07-29https://a2a-protocol.org/dev/tutorials/python/4-agent-executor/2025-07-29https://a2a-protocol.org/dev/tutorials/python/5-start-server/2025-07-29https://a2a-protocol.org/dev/tutorials/python/6-interact-with-server/2025-07-29https://a2a-protocol.org/dev/tutorials/python/7-streaming-and-multiturn/2025-07-29https://a2a-protocol.org/dev/tutorials/python/8-next-steps/2025-07-29
+
+<urlsetxmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/community/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/partners/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/roadmap/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/specification/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/sdk/python/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/a2a-and-mcp/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/agent-discovery/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/enterprise-ready/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/extensions/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/key-concepts/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/life-of-a-task/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/streaming-and-async/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/topics/what-is-a2a/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/1-introduction/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/2-setup/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/3-agent-skills-and-card/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/4-agent-executor/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/5-start-server/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/6-interact-with-server/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/7-streaming-and-multiturn/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+<url>
+
+<loc>https://a2a-protocol.org/dev/tutorials/python/8-next-steps/</loc>
+
+<lastmod>2025-07-29</lastmod>
+
+...
+
+</url>
+
+...
+
+</urlset>
+
+<|firecrawl-page-7-lllmstxt|>
+## Interacting with A2A Server
+[Skip to content](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#6-interacting-with-the-server)
+
+# 6\. Interacting with the Server [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#6-interacting-with-the-server "Permanent link")
+
+With the Helloworld A2A server running, let's send some requests to it. The SDK includes a client ( `A2AClient`) that simplifies these interactions.
+
+## The Helloworld Test Client [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#the-helloworld-test-client "Permanent link")
+
+The `test_client.py` script demonstrates how to:
+
+1. Fetch the Agent Card from the server.
+2. Create an `A2AClient` instance.
+3. Send both non-streaming ( `message/send`) and streaming ( `message/stream`) requests.
+
+Open a **new terminal window**, activate your virtual environment, and navigate to the `a2a-samples` directory.
+
+Activate virtual environment (Be sure to do this in the same directory where you created the virtual environment):
+
+[Mac/Linux](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#maclinux)[Windows](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#windows)
+
+```md-code__content
+source .venv/bin/activate
+
+```
+
+```md-code__content
+.venv\Scripts\activate
+
+```
+
+Run the test client:
+
+```md-code__content
+# from the a2a-samples directory
+python samples/python/agents/helloworld/test_client.py
+
+```
+
+## Understanding the Client Code [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#understanding-the-client-code "Permanent link")
+
+Let's look at key parts of `test_client.py`:
+
+1. **Fetching the Agent Card & Initializing the Client**:
+
+
+
+```md-code__content
+base_url = 'http://localhost:9999'
+
+async with httpx.AsyncClient() as httpx_client:
+       # Initialize A2ACardResolver
+       resolver = A2ACardResolver(
+           httpx_client=httpx_client,
+           base_url=base_url,
+           # agent_card_path uses default, extended_agent_card_path also uses default
+       )
+
+```
+
+
+
+The `A2ACardResolver` class is a convenience. It first fetches the `AgentCard` from the server's `/.well-known/agent-card.json` endpoint (based on the provided base URL) and then initializes the client with it.
+
+2. **Sending a Non-Streaming Message ( `send_message`)**:
+
+
+
+```md-code__content
+client = A2AClient(
+       httpx_client=httpx_client, agent_card=final_agent_card_to_use
+)
+logger.info('A2AClient initialized.')
+
+send_message_payload: dict[str, Any] = {
+       'message': {
+           'role': 'user',
+           'parts': [\
+               {'kind': 'text', 'text': 'how much is 10 USD in INR?'}\
+           ],
+           'messageId': uuid4().hex,
+       },
+}
+request = SendMessageRequest(
+       id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+)
+
+response = await client.send_message(request)
+print(response.model_dump(mode='json', exclude_none=True))
+
+```
+
+
+   - The `send_message_payload` constructs the data for `MessageSendParams`.
+   - This is wrapped in a `SendMessageRequest`.
+   - It includes a `message` object with the `role` set to "user" and the content in `parts`.
+   - The Helloworld agent's `execute` method will enqueue a single "Hello World" message. The `DefaultRequestHandler` will retrieve this and send it as the response.
+   - The `response` will be a `SendMessageResponse` object, which contains either a `SendMessageSuccessResponse` (with the agent's `Message` as the result) or a `JSONRPCErrorResponse`.
+3. **Handling Task IDs (Illustrative Note for Helloworld)**:
+
+The Helloworld client ( `test_client.py`) doesn't attempt `get_task` or `cancel_task` directly because the simple Helloworld agent's `execute` method, when called via `message/send`, results in the `DefaultRequestHandler` returning a direct `Message` response rather than a `Task` object. More complex agents that explicitly manage tasks (like the LangGraph example) would return a `Task` object from `message/send`, and its `id` could then be used for `get_task` or `cancel_task`.
+
+4. **Sending a Streaming Message ( `send_message_streaming`)**:
+
+
+
+```md-code__content
+streaming_request = SendStreamingMessageRequest(
+       id=str(uuid4()), params=MessageSendParams(**send_message_payload)
+)
+
+stream_response = client.send_message_streaming(streaming_request)
+
+async for chunk in stream_response:
+       print(chunk.model_dump(mode='json', exclude_none=True))
+
+```
+
+
+   - This method calls the agent's `message/stream` endpoint. The `DefaultRequestHandler` will invoke the `HelloWorldAgentExecutor.execute` method.
+   - The `execute` method enqueues one "Hello World" message, and then the event queue is closed.
+   - The client will receive this single message as one `SendStreamingMessageResponse` event, and then the stream will terminate.
+   - The `stream_response` is an `AsyncGenerator`.
+
+## Expected Output [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#expected-output "Permanent link")
+
+When you run `test_client.py`, you'll see JSON outputs for:
+
+- The non-streaming response (a single "Hello World" message).
+- The streaming response (a single "Hello World" message as one chunk, after which the stream ends).
+
+The `id` fields in the output will vary with each run.
+
+```md-code__content
+// Non-streaming response
+{"jsonrpc":"2.0","id":"xxxxxxxx","result":{"type":"message","role":"agent","parts":[{"type":"text","text":"Hello World"}],"messageId":"yyyyyyyy"}}
+// Streaming response (one chunk)
+{"jsonrpc":"2.0","id":"zzzzzzzz","result":{"type":"message","role":"agent","parts":[{"type":"text","text":"Hello World"}],"messageId":"wwwwwwww","final":true}}
+
+```
+
+_(Actual IDs like `xxxxxxxx`, `yyyyyyyy`, `zzzzzzzz`, `wwwwwwww` will be different UUIDs/request IDs)_
+
+This confirms your server is correctly handling basic A2A interactions with the updated SDK structure!
+
+Now you can shut down the server by typing Ctrl+C in the terminal window where `__main__.py` is running.
+
+<|firecrawl-page-8-lllmstxt|>
+## Agent Executor Tutorial
+[Skip to content](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/#4-the-agent-executor)
+
+# 4\. The Agent Executor [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#4-the-agent-executor "Permanent link")
+
+The core logic of how an A2A agent processes requests and generates responses/events is handled by an **Agent Executor**. The A2A Python SDK provides an abstract base class `a2a.server.agent_execution.AgentExecutor` that you implement.
+
+## `AgentExecutor` Interface [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#agentexecutor-interface "Permanent link")
+
+The `AgentExecutor` class defines two primary methods:
+
+- `async def execute(self, context: RequestContext, event_queue: EventQueue)`: Handles incoming requests that expect a response or a stream of events. It processes the user's input (available via `context`) and uses the `event_queue` to send back `Message`, `Task`, `TaskStatusUpdateEvent`, or `TaskArtifactUpdateEvent` objects.
+- `async def cancel(self, context: RequestContext, event_queue: EventQueue)`: Handles requests to cancel an ongoing task.
+
+The `RequestContext` provides information about the incoming request, such as the user's message and any existing task details. The `EventQueue` is used by the executor to send events back to the client.
+
+## Helloworld Agent Executor [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#helloworld-agent-executor "Permanent link")
+
+Let's look at `agent_executor.py`. It defines `HelloWorldAgentExecutor`.
+
+1. **The Agent ( `HelloWorldAgent`)**:
+    This is a simple helper class that encapsulates the actual "business logic".
+
+
+
+```md-code__content
+class HelloWorldAgent:
+       """Hello World Agent."""
+
+       async def invoke(self) -> str:
+           return 'Hello World'
+
+```
+
+
+
+It has a simple `invoke` method that returns the string "Hello World".
+
+2. **The Executor ( `HelloWorldAgentExecutor`)**:
+    This class implements the `AgentExecutor` interface.
+   - **`__init__`**:
+
+
+
+     ```md-code__content
+     class HelloWorldAgentExecutor(AgentExecutor):
+         """Test AgentProxy Implementation."""
+
+         def __init__(self):
+             self.agent = HelloWorldAgent()
+
+     ```
+
+
+
+     It instantiates the `HelloWorldAgent`.
+
+   - **`execute`**:
+
+
+
+     ```md-code__content
+     async def execute(
+         self,
+         context: RequestContext,
+         event_queue: EventQueue,
+     ) -> None:
+         result = await self.agent.invoke()
+         await event_queue.enqueue_event(new_agent_text_message(result))
+
+     ```
+
+
+
+     When a `message/send` or `message/stream` request comes in (both are handled by `execute` in this simplified executor):
+     1. It calls `self.agent.invoke()` to get the "Hello World" string.
+     2. It creates an A2A `Message` object using the `new_agent_text_message` utility function.
+     3. It enqueues this message onto the `event_queue`. The underlying `DefaultRequestHandler` will then process this queue to send the response(s) to the client. For a single message like this, it will result in a single response for `message/send` or a single event for `message/stream` before the stream closes.
+   - **`cancel`**:
+      The Helloworld example's `cancel` method simply raises an exception, indicating that cancellation is not supported for this basic agent.
+
+
+
+     ```md-code__content
+     async def cancel(
+         self, context: RequestContext, event_queue: EventQueue
+     ) -> None:
+         raise Exception('cancel not supported')
+
+     ```
+
+The `AgentExecutor` acts as the bridge between the A2A protocol (managed by the request handler and server application) and your agent's specific logic. It receives context about the request and uses an event queue to communicate results or updates back.
+
+<|firecrawl-page-9-lllmstxt|>
+## A2A and MCP Protocols
+[Skip to content](https://a2a-protocol.org/latest/topics/a2a-and-mcp/#a2a-and-mcp-complementary-protocols-for-agentic-systems)
+
+# A2A and MCP: Complementary Protocols for Agentic Systems [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#a2a-and-mcp-complementary-protocols-for-agentic-systems "Permanent link")
+
+## A2A ❤️ MCP [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#a2a-mcp "Permanent link")
+
+In the landscape of AI agent development, two key types of protocols are emerging to facilitate interoperability: those for connecting agents to **tools and resources**, and those for enabling **agent-to-agent collaboration**. The Agent2Agent (A2A) Protocol and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) address these distinct but related needs.
+
+**TL;DR;** Agentic applications need both A2A and MCP. We recommend MCP for tools and A2A for agents.
+
+## Why Different Protocols? [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#why-different-protocols "Permanent link")
+
+The distinction arises from the nature of what an agent interacts with:
+
+- **Tools & Resources:**
+  - These are typically primitives with well-defined, structured inputs and outputs. They perform specific, often stateless, functions (e.g., a calculator, a database query API, a weather lookup service).
+  - Their behavior is generally predictable and transactional.
+  - Interaction is often a single request-response cycle.
+- **Agents:**
+  - These are more autonomous systems. They can reason, plan, use multiple tools, maintain state over longer interactions, and engage in complex, often multi-turn dialogues to achieve novel or evolving tasks.
+  - Their behavior can be emergent and less predictable than a simple tool.
+  - Interaction often involves ongoing tasks, context sharing, and negotiation.
+
+Agentic applications need to leverage both: agents use tools to gather information and perform actions, and agents collaborate with other agents to tackle broader, more complex goals.
+
+## Model Context Protocol (MCP) [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#model-context-protocol-mcp "Permanent link")
+
+- **Focus:** MCP standardizes how AI models and agents connect to and interact with **tools, APIs, data sources, and other external resources.**
+- **Mechanism:** It defines a structured way to describe tool capabilities (akin to function calling in Large Language Models), pass inputs to them, and receive structured outputs.
+- **Use Cases:**
+  - Enabling an LLM to call an external API (e.g., fetch current stock prices).
+  - Allowing an agent to query a database with specific parameters.
+  - Connecting an agent to a set of predefined functions or services.
+- **Ecosystem:** MCP aims to create an ecosystem where tool providers can easily expose their services to various AI models and agent frameworks, and agent developers can easily consume these tools in a standardized way.
+
+## Agent2Agent Protocol (A2A) [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#agent2agent-protocol-a2a "Permanent link")
+
+- **Focus:** A2A standardizes how independent, often opaque, **AI agents communicate and collaborate with each other as peers.**
+- **Mechanism:** It provides an application-level protocol for agents to:
+  - Discover each other's high-level skills and capabilities (via Agent Cards).
+  - Negotiate interaction modalities (text, files, structured data).
+  - Manage shared, stateful, and potentially long-running tasks.
+  - Exchange conversational context, instructions, and complex, multi-part results.
+- **Use Cases:**
+  - A customer service agent delegating a complex billing inquiry to a specialized billing agent, maintaining context of the customer interaction.
+  - A travel planning agent coordinating with separate flight, hotel, and activity booking agents, managing a multi-stage booking process.
+  - Agents exchanging information and status updates for a collaborative project that evolves over time.
+- **Key Difference from Tool Interaction:** A2A allows for more dynamic, stateful, and potentially multi-modal interactions than typically seen with simple tool calls. Agents using A2A communicate _as agents_ (or on behalf of users) rather than just invoking a discrete function.
+
+## How A2A and MCP Complement Each Other [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#how-a2a-and-mcp-complement-each-other "Permanent link")
+
+A2A and MCP are not mutually exclusive; they are highly complementary and address different layers of an agentic system's interaction needs.
+
+![Diagram showing A2A and MCP working together. A User interacts with Agent A via A2A. Agent A interacts with Agent B via A2A. Agent B uses MCP to interact with Tool 1 and Tool 2.](https://a2a-protocol.org/latest/assets/a2a-mcp.png)
+
+_An agentic application might use A2A to communicate with other agents, while each agent internally uses MCP to interact with its specific tools and resources._
+
+### Example Scenario: The Auto Repair Shop [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#example-scenario-the-auto-repair-shop "Permanent link")
+
+> Consider an auto repair shop staffed by autonomous AI agent "mechanics" who use special-purpose tools (such as vehicle jacks, multimeters, and socket wrenches) to diagnose and repair problems. The workers often have to diagnose and repair problems they have not seen before. The repair process can involve extensive conversations with a customer, research, and working with part suppliers.
+
+1. **Customer Interaction (User-to-Agent via A2A):**
+   - A customer (or their primary assistant agent) uses A2A to communicate with the "Shop Manager" agent: _"My car is making a rattling noise."_
+   - The Shop Manager agent uses A2A for a multi-turn diagnostic conversation: _"Can you send a video of the noise?"_, _"I see some fluid leaking. How long has this been happening?"_
+2. **Internal Tool Usage (Agent-to-Tool via MCP):**
+   - The Mechanic agent, assigned the task by the Shop Manager, needs to diagnose the issue. It uses MCP to interact with its specialized tools:
+     - MCP call to a "Vehicle Diagnostic Scanner" tool: `scan_vehicle_for_error_codes(vehicle_id='XYZ123')`.
+     - MCP call to a "Repair Manual Database" tool: `get_repair_procedure(error_code='P0300', vehicle_make='Toyota', vehicle_model='Camry')`.
+     - MCP call to a "Platform Lift" tool: `raise_platform(height_meters=2)`.
+3. **Supplier Interaction (Agent-to-Agent via A2A):**
+   - The Mechanic agent determines a specific part is needed. It uses A2A to communicate with a "Parts Supplier" agent: _"Do you have part #12345 in stock for a Toyota Camry 2018?"_
+   - The Parts Supplier agent, also an A2A-compliant system, responds, potentially leading to an order.
+
+In this example:
+
+- **A2A** facilitates the higher-level, conversational, and task-oriented interactions between the customer and the shop, and between the shop's agents and external supplier agents.
+- **MCP** enables the mechanic agent to use its specific, structured tools to perform its diagnostic and repair functions.
+
+## Representing A2A Agents as MCP Resources [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#representing-a2a-agents-as-mcp-resources "Permanent link")
+
+It's conceivable that an A2A Server (a remote agent) could also expose some of its skills as MCP-compatible resources, especially if those skills are well-defined and can be invoked in a more tool-like, stateless manner. In such a case, another agent might "discover" this A2A agent's specific skill via an MCP-style tool description (perhaps derived from its Agent Card).
+
+However, the primary strength of A2A lies in its support for more flexible, stateful, and collaborative interactions that go beyond typical tool invocation. A2A is about agents _partnering_ on tasks, while MCP is more about agents _using_ capabilities.
+
+By leveraging both A2A for inter-agent collaboration and MCP for tool integration, developers can build more powerful, flexible, and interoperable AI systems.
+
+<|firecrawl-page-10-lllmstxt|>
 ## A2A Protocol Specification
 [Skip to content](https://a2a-protocol.org/latest/specification/#agent2agent-a2a-protocol-specification)
 
@@ -2632,1570 +3489,3 @@ Implementations **SHOULD** validate compliance through:
 - **Error handling**: Verify proper handling of all defined error conditions.
 - **Data format validation**: Ensure JSON schemas match the TypeScript type definitions in [`types/src/types.ts`](https://a2a-protocol.org/latest/specification/types/src/types.ts).
 - **Multi-transport consistency**: For multi-transport agents, verify functional equivalence across all supported transports.
-
-## A2A Partners List
-[Skip to content](https://a2a-protocol.org/latest/partners/#partners)
-
-# Partners [¶](https://a2a-protocol.org/latest/partners/\#partners "Permanent link")
-
-Below is a list of partners (and a link to their A2A announcement or blog post,
-if available) who are part of the A2A community and are helping build, codify,
-and adopt A2A as the standard protocol for AI agents to communicate and
-collaborate effectively with each other and with users.
-
-Note
-
-If you're interested in becoming a partner of A2A and getting your listing added to or updated on this page, let us know by [submitting this form](https://goo.gle/a2a-partner-form), and we'll contact you soon!
-
-- [Accelirate Inc](https://www.accelirate.com/)
-- [Accenture](https://www.accenture.com/)
-- [Activeloop](https://www.activeloop.ai/)
-- [Adobe](https://www.adobe.com/)
-- [AI21 Labs](https://www.ai21.com/)
-- [AI71](https://ai71.ai/)
-- [Aisera](https://aisera.com/)
-- [Almawave.it](http://www.almawave.it/)
-- [AliCloud](http://www.alibabacloud.com/)
-- [ArcBlock](http://www.arcblock.io/)
-- [Arize](https://arize.com/blog/arize-ai-and-future-of-agent-interoperability-embracing-googles-a2a-protocol/)
-- [Articul8](https://www.articul8.ai/news/unleashing-the-next-frontier-of-enterprise-ai-introducing-model-mesh-dock-and-inter-lock-and-our-a2-a-partnership-with-google)
-- [ask-ai.com](https://ask-ai.com/)
-- [Atlassian](https://www.atlassian.com/)
-- [Auth0](https://auth0.com/blog/auth0-google-a2a/)
-- [Autodesk](https://www.autodesk.com/)
-- [AWS](https://aws.amazon.com/)
-- [Beekeeper](http://beekeeper.io/)
-- [BCG](https://www.bcg.com/)
-- [Block Inc](https://block.xyz/)
-- [Bloomberg LP](http://techatbloomberg.com/)
-- [BLUEISH Inc](https://www.blueish.co.jp/)
-- [BMC Software Inc](https://www.bmc.com/it-solutions/bmc-helix.html)
-- [Boomi](https://boomi.com/)
-- [Box](https://www.box.com/)
-- [Bridge2Things Automation Process GmbH](http://bridge2things.at/)
-- [Cafe 24](https://www.cafe24corp.com/en/company/about)
-- [C3 AI](https://c3.ai/)
-- [Capgemini](https://www.capgemini.com/)
-- [Chronosphere](https://chronosphere.io/)
-- [Cisco](https://www.cisco.com/)
-- [Codimite PTE LTD](https://codimite.ai/)
-- [Cognigy](https://www.cognigy.com/)
-- [Cognizant](https://www.cognizant.com/)
-- [Cohere](https://cohere.com/)
-- [Collibra](https://www.collibra.com/)
-- [Confluent](https://developer.confluent.io/)
-- [Contextual](https://contextual.ai/)
-- [Cotality](https://cotality.com/) (fka Corelogic)
-- [Crubyt](https://www.crubyt.com/)
-- [Cyderes](http://www.cyderes.com/)
-- [Datadog](https://www.datadoghq.com/)
-- [DataRobot](https://www.datarobot.com/)
-- [DataStax](https://www.datastax.com/)
-- [Decagon.ai](https://decagon.ai/)
-- [Deloitte](https://www.prnewswire.com/news-releases/deloitte-expands-alliances-with-google-cloud-and-servicenow-to-accelerate-agentic-ai-adoption-in-the-enterprise-302423941.html)
-- [Devnagri](https://devnagri.com/)
-- [Deutsche Telekom](https://www.telekom.com/en)
-- [Dexter Tech Labs](http://www.dextertechlabs.com/)
-- [Distyl.ai](https://distyl.ai/)
-- [Elastic](https://www.elastic.co/)
-- [Ema.co](https://ema.co/)
-- [EPAM](https://www.epam.com/)
-- [Eviden (Atos Group)](https://atos.net/)
-- [fractal.ai](https://fractal.ai/new)
-- [GenAI Nebula9.ai Solutions Pvt Ltd](http://nebula9.ai/)
-- [Glean](https://www.glean.com/)
-- [Global Logic](https://www.globallogic.com/)
-- [Gravitee](https://www.gravitee.io/)
-- [GrowthLoop](https://growthloop.com/)
-- [Guru](http://www.getguru.com/)
-- [Harness](https://harness.io/)
-- [HCLTech](https://www.hcltech.com/)
-- [Headwaters](https://www.headwaters.co.jp/)
-- [Hellotars](https://hellotars.com/)
-- [Hexaware](https://hexaware.com/)
-- [HUMAN](https://www.humansecurity.com/)
-- [Incorta](https://www.incorta.com/)
-- [InfoSys](https://www.infosys.com/)
-- [Intuit](https://www.intuit.com/)
-- [Iron Mountain](https://www.ironmountain.com/)
-- [JetBrains](https://www.jetbrains.com/)
-- [JFrog](https://jfrog.com/)
-- [King's College London](https://www.kcl.ac.uk/informatics)
-- [KPMG](https://kpmg.com/us/en/media/news/kpmg-google-cloud-alliance-expansion-agentspace-adoption.html)
-- [Kyndryl](http://www.kyndryl.com/)
-- [LabelBox](https://labelbox.com/)
-- [LangChain](https://www.langchain.com/)
-- [LG CNS](http://www.lgcns.com/)
-- [Livex.ai](https://livex.ai/)
-- [LlamaIndex](https://x.com/llama_index/status/1912949446322852185)
-- [LTIMindTtree](https://www.ltimindtree.com/)
-- [Lumeris](https://www.lumeris.com/)
-- [Lyzr.ai](https://lyzr.ai/)
-- [Magyar Telekom](https://www.telekom.hu/)
-- [Microsoft](https://www.microsoft.com/en-us/microsoft-cloud/blog/2025/05/07/empowering-multi-agent-apps-with-the-open-agent2agent-a2a-protocol/)
-- [McKinsey](https://www.mckinsey.com/)
-- [MongoDB](https://www.mongodb.com/)
-- [Monite](https://monite.com/)
-- [Neo4j](https://neo4j.com/)
-- [New Relic](https://newrelic.com/)
-- [Nisum](http://www.nisum.com/)
-- [Noorle Inc](http://www.noorle.com/)
-- [Optimizely Inc](https://www.optimizely.com/)
-- [Oracle / NetSuite](https://www.oracle.com/netsuite)
-- [Palo Alto Networks](https://www.paloaltonetworks.com/)
-- [PancakeAI](https://www.pancakeai.tech/)
-- [Pendo](https://www.pendo.io/)
-- [PerfAI.ai](https://perfai.ai/)
-- [Personal AI](https://personal.ai/)
-- [Poppulo](https://www.poppulo.com/blog/poppulo-google-a2a-the-future-of-workplace-communication)
-- [Productive Edge](https://www.productiveedge.com/)
-- [Proofs](https://proofs.io/)
-- [Publicis Sapient](https://www.publicissapient.com/)
-- [PWC](https://www.pwc.com/)
-- [Quantiphi](https://www.quantiphi.com/)
-- [Radix](https://radix.website/)
-- [RagaAI Inc](https://raga.ai/)
-- [Red Hat](https://www.redhat.com/)
-- [Reltio Inc](http://www.reltio.com/)
-- [S&P](https://www.spglobal.com/)
-- [Sage](https://www.sage.com/en-us/)
-- [Salesforce](https://www.salesforce.com/)
-- [SAP](https://news.sap.com/2025/04/sap-google-cloud-enterprise-ai-open-agent-collaboration-model-choice-multimodal-intelligence/)
-- [Sayone Technologies](https://www.sayonetech.com/)
-- [ServiceNow](https://www.servicenow.com/)
-- [Siemens AG](https://siemens.com/)
-- [SoftBank Corp](https://www.softbank.jp/en//)
-- [Solace](https://solace.com/products/agent-mesh/)
-- [Solo.io](https://www.solo.io/)
-- [Stacklok, Inc](https://stacklok.com/)
-- [Supertab](https://www.supertab.co/post/supertab-connect-partners-with-google-cloud-to-enable-ai-agents)
-- [Suzega](https://suzega.com/)
-- [TCS](https://www.tcs.com/)
-- [Tech Mahindra](https://www.techmahindra.com/)
-- [Telefonica](https://www.telefonica.com/)
-- [Test Innovation Technology](https://www.test-it.com/)
-- [the artinet project](https://artinet.io/)
-- [Think41](http://www.think41.com/)
-- [Thoughtworks](https://www.thoughtworks.com/)
-- [Tredence](http://www.tredence.com/)
-- [Two Tall Totems Ltd. DBA TTT Studios](https://ttt.studio/)
-- [Typeface](https://typeface.ai/)
-- [UKG](https://www.ukg.com/)
-- [UiPath](https://www.uipath.com/newsroom/uipath-launches-first-enterprise-grade-platform-for-agentic-automation)
-- [Upwork, Inc.](https://www.upwork.com/)
-- [Ushur, Inc.](http://ushur.ai/)
-- [Valle AI](http://www.valleai.com.br/)
-- [Valtech](https://www.valtech.com/)
-- [Vervelo](https://www.vervelo.com/)
-- [VoltAgent](https://voltagent.dev/)
-- [Weights & Biases](https://wandb.ai/wandb_fc/product-announcements-fc/reports/Powering-Agent-Collaboration-Weights-Biases-Partners-with-Google-Cloud-on-Agent2Agent-Interoperability-Protocol---VmlldzoxMjE3NDg3OA)
-- [Wipro](https://www.wipro.com/)
-- [Workday](https://www.workday.com/)
-- [Writer](https://writer.com/)
-- [Zenity](https://zenity.io/)
-- [Zeotap](https://www.zeotap.com/)
-- [Zocket Technologies , Inc.](https://zocket.ai/)
-- [Zoom](https://www.zoom.us/)
-- [zyprova](http://www.zyprova.com/)
-
-## A2A Protocol Roadmap
-[Skip to content](https://a2a-protocol.org/latest/roadmap/#a2a-protocol-roadmap)
-
-# A2A protocol roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#a2a-protocol-roadmap "Permanent link")
-
-**Last updated:** Jul 16, 2025
-
-## Near-term initiatives [¶](https://a2a-protocol.org/latest/roadmap/\#near-term-initiatives "Permanent link")
-
-- Release `0.3` version of the protocol which we intend to keep supported and without breaking changes for a significant amount of time with backward compatibility of the SDKs starting at version `0.3`. As part of this release there are a few known breaking changes including:
-  - Update the `/.well-known/agent.json` path for hosting Agent Cards to `/.well-known/agent-card.json` based on feedback from IANA.
-  - Refactor class fields to be more Pythonic and adopt `snake_case`. [PR 199](https://github.com/a2aproject/a2a-python/pull/199)
-- Solidify the support for [A2A extensions](https://a2a-protocol.org/latest/topics/extensions/) with SDK support (starting with the Python SDK) and publishing sample extensions.
-- Introduce support for signed Agent Cards [Discussion 199](https://github.com/a2aproject/A2A/discussions/199#discussioncomment-13770576) to allow verifying the integrity of Agent Card content.
-- Enhance the client side support in SDK (starting with Python) to expose ready-to-use A2A clients, streamlined auth handling and improved handling of tasks.
-
-To review recent protocol changes see [Release Notes](https://github.com/a2aproject/A2A/releases).
-
-## Longer term (3-6 month period) roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#longer-term-3-6-month-period-roadmap "Permanent link")
-
-### Governance [¶](https://a2a-protocol.org/latest/roadmap/\#governance "Permanent link")
-
-The protocol has been [donated](https://www.linuxfoundation.org/press/linux-foundation-launches-the-agent2agent-protocol-project-to-enable-secure-intelligent-communication-between-ai-agents) to the Linux Foundation. The TSC is working on implementing a governance structure that prioritizes community-led development with standardized processes for contributing to the specification, SDKs and tooling. As part of the effort there will be dedicated working groups created for specific areas of the protocol.
-
-### Agent Registry [¶](https://a2a-protocol.org/latest/roadmap/\#agent-registry "Permanent link")
-
-Agent Registry enables the discovery of agents and is a critical component of a multi-agent system. There is an active and ongoing discussion in the community around the latest [Discussion 741](https://github.com/a2aproject/A2A/discussions/741).
-
-### Validation [¶](https://a2a-protocol.org/latest/roadmap/\#validation "Permanent link")
-
-As the A2A ecosystem matures, it becomes critical for the A2A community to have tools to validate their agents. The community has launched two efforts to help with validation which the group will continue to enhance in the coming months. Learn more about [A2A Inspector](https://github.com/a2aproject/a2a-inspector) and the [A2A Protocol Technology Compatibility Kit](https://github.com/a2aproject/a2a-tck) (TCK).
-
-### SDKs [¶](https://a2a-protocol.org/latest/roadmap/\#sdks "Permanent link")
-
-A2A Project currently hosts SDKs in four languages (Python, JS, Java, .NET) and contributors are adding more including Go (in progress).
-
-### Community best practices [¶](https://a2a-protocol.org/latest/roadmap/\#community-best-practices "Permanent link")
-
-As companies and individuals deploy A2A systems at an increasing pace, we are looking to accelerate the learning of the community by collecting and sharing the best practices and success stories that A2A enabled.
-
-## A2A Protocol Roadmap
-[Skip to content](https://a2a-protocol.org/latest/roadmap/#a2a-protocol-roadmap)
-
-# A2A protocol roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#a2a-protocol-roadmap "Permanent link")
-
-**Last updated:** Jul 16, 2025
-
-## Near-term initiatives [¶](https://a2a-protocol.org/latest/roadmap/\#near-term-initiatives "Permanent link")
-
-- Release `0.3` version of the protocol which we intend to keep supported and without breaking changes for a significant amount of time with backward compatibility of the SDKs starting at version `0.3`. As part of this release there are a few known breaking changes including:
-  - Update the `/.well-known/agent.json` path for hosting Agent Cards to `/.well-known/agent-card.json` based on feedback from IANA.
-  - Refactor class fields to be more Pythonic and adopt `snake_case`. [PR 199](https://github.com/a2aproject/a2a-python/pull/199)
-- Solidify the support for [A2A extensions](https://a2a-protocol.org/latest/topics/extensions/) with SDK support (starting with the Python SDK) and publishing sample extensions.
-- Introduce support for signed Agent Cards [Discussion 199](https://github.com/a2aproject/A2A/discussions/199#discussioncomment-13770576) to allow verifying the integrity of Agent Card content.
-- Enhance the client side support in SDK (starting with Python) to expose ready-to-use A2A clients, streamlined auth handling and improved handling of tasks.
-
-To review recent protocol changes see [Release Notes](https://github.com/a2aproject/A2A/releases).
-
-## Longer term (3-6 month period) roadmap [¶](https://a2a-protocol.org/latest/roadmap/\#longer-term-3-6-month-period-roadmap "Permanent link")
-
-### Governance [¶](https://a2a-protocol.org/latest/roadmap/\#governance "Permanent link")
-
-The protocol has been [donated](https://www.linuxfoundation.org/press/linux-foundation-launches-the-agent2agent-protocol-project-to-enable-secure-intelligent-communication-between-ai-agents) to the Linux Foundation. The TSC is working on implementing a governance structure that prioritizes community-led development with standardized processes for contributing to the specification, SDKs and tooling. As part of the effort there will be dedicated working groups created for specific areas of the protocol.
-
-### Agent Registry [¶](https://a2a-protocol.org/latest/roadmap/\#agent-registry "Permanent link")
-
-Agent Registry enables the discovery of agents and is a critical component of a multi-agent system. There is an active and ongoing discussion in the community around the latest [Discussion 741](https://github.com/a2aproject/A2A/discussions/741).
-
-### Validation [¶](https://a2a-protocol.org/latest/roadmap/\#validation "Permanent link")
-
-As the A2A ecosystem matures, it becomes critical for the A2A community to have tools to validate their agents. The community has launched two efforts to help with validation which the group will continue to enhance in the coming months. Learn more about [A2A Inspector](https://github.com/a2aproject/a2a-inspector) and the [A2A Protocol Technology Compatibility Kit](https://github.com/a2aproject/a2a-tck) (TCK).
-
-### SDKs [¶](https://a2a-protocol.org/latest/roadmap/\#sdks "Permanent link")
-
-A2A Project currently hosts SDKs in four languages (Python, JS, Java, .NET) and contributors are adding more including Go (in progress).
-
-### Community best practices [¶](https://a2a-protocol.org/latest/roadmap/\#community-best-practices "Permanent link")
-
-As companies and individuals deploy A2A systems at an increasing pace, we are looking to accelerate the learning of the community by collecting and sharing the best practices and success stories that A2A enabled.
-
-## A2A Protocol Concepts
-[Skip to content](https://a2a-protocol.org/latest/topics/key-concepts/#key-concepts-in-a2a)
-
-# Key Concepts in A2A [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#key-concepts-in-a2a "Permanent link")
-
-The Agent2Agent (A2A) protocol is built around a set of core concepts that define how agents interact. Understanding these concepts is crucial for developing or integrating with A2A-compliant systems.
-
-![A2A Actors showing a User, A2A Client (Client Agent), and A2A Server (Remote Agent)](https://a2a-protocol.org/latest/assets/a2a-actors.png)
-
-## Core Actors [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#core-actors "Permanent link")
-
-- **User:** The end user (human or automated service) who initiates a request or goal that requires agent assistance.
-- **A2A Client (Client Agent):** An application, service, or another AI agent that acts on behalf of the user to request actions or information from a remote agent. The client initiates communication using the A2A protocol.
-- **A2A Server (Remote Agent):** An AI agent or agentic system that exposes an HTTP endpoint implementing the A2A protocol. It receives requests from clients, processes tasks, and returns results or status updates. The remote agent operates as an "opaque" system from the client's perspective, meaning the client doesn't need to know its internal workings, memory, or tools.
-
-## Fundamental Communication Elements [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#fundamental-communication-elements "Permanent link")
-
-- **Agent Card:**
-  - A JSON metadata document, typically discoverable at a well-known URL (e.g., `/.well-known/agent-card.json`), that describes an A2A Server.
-  - It details the agent's identity (name, description), service endpoint URL, version, supported A2A capabilities (like streaming or push notifications), specific skills it offers, default input/output modalities, and authentication requirements.
-  - Clients use the Agent Card to discover agents and understand how to interact with them securely and effectively.
-  - See details in the [Protocol Specification: Agent Card](https://a2a-protocol.org/latest/specification/#5-agent-discovery-the-agent-card).
-- **Task:**
-  - When a client sends a message to an agent, the agent might determine that fulfilling the request requires a stateful task to be completed (e.g., "generate a report," "book a flight," "answer a question").
-  - Each task has a unique ID defined by the agent and progresses through a defined lifecycle (e.g., `submitted`, `working`, `input-required`, `completed`, `failed`).
-  - Tasks are stateful and can involve multiple exchanges (messages) between the client and the server.
-  - See details in the [Life of a Task](https://a2a-protocol.org/latest/topics/life-of-a-task/).
-  - Protocol specification: [Task Object](https://a2a-protocol.org/latest/specification/#61-task-object).
-- **Message:**
-  - Represents a single turn or unit of communication between a client and an agent.
-  - Messages have a `role` (either `"user"` for client-sent messages or `"agent"` for server-sent messages) and contain one or more `Part` objects that carry the actual content. `messageId` part of the Message object is a unique identifier for each message set by the sender of the message.
-  - Used for conveying instructions, context, questions, answers, or status updates that are not necessarily formal `Artifacts` that are part of a `Task`.
-  - See details in the [Protocol Specification: Message Object](https://a2a-protocol.org/latest/specification/#64-message-object).
-- **Part:**
-  - The fundamental unit of content within a `Message` or an `Artifact`. Each part has a specific `type` and can carry different kinds of data:
-    - `TextPart`: Contains plain textual content.
-    - `FilePart`: Represents a file, which can be transmitted as inline base64-encoded bytes or referenced via a URI. Includes metadata like filename and Media Type.
-    - `DataPart`: Carries structured JSON data, useful for forms, parameters, or any machine-readable information.
-  - See details in the [Protocol Specification: Part Union Type](https://a2a-protocol.org/latest/specification/#65-part-union-type).
-- **Artifact:**
-  - Represents a tangible output or result generated by the remote agent during the processing of a task.
-  - Examples include generated documents, images, spreadsheets, structured data results, or any other self-contained piece of information that is a direct result of the task.
-  - Tasks in completed state SHOULD use artifact objects for returning the generated output to the clients.
-  - Artifacts are composed of one or more `Part` objects and can be streamed incrementally.
-  - See details in the [Protocol Specification: Artifact Object](https://a2a-protocol.org/latest/specification/#67-artifact-object).
-
-## Interaction Mechanisms [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#interaction-mechanisms "Permanent link")
-
-- **Request/Response (Polling):**
-  - The client sends a request (e.g., using the `message/send` RPC method) and receives a response from the server.
-  - If the interaction requires a stateful long-running task, the server might initially respond with a `working` status. The client would then periodically call `tasks/get` to poll for updates until the task reaches a terminal state (e.g., `completed`, `failed`).
-- **Streaming (Server-Sent Events - SSE):**
-  - For tasks that produce results incrementally or provide real-time progress updates.
-  - The client initiates an interaction with the server using `message/stream`.
-  - The server responds with an HTTP connection that remains open, over which it sends a stream of Server-Sent Events (SSE).
-  - These events can be `Task`, `Message`, or `TaskStatusUpdateEvent` (for status changes) or `TaskArtifactUpdateEvent` (for new or updated artifact chunks).
-  - This requires the server to advertise the `streaming` capability in its Agent Card.
-  - Learn more about [Streaming & Asynchronous Operations](https://a2a-protocol.org/latest/topics/streaming-and-async/).
-- **Push Notifications:**
-  - For very long-running tasks or scenarios where maintaining a persistent connection (like SSE) is impractical.
-  - The client can provide a webhook URL when initiating a task (or by calling `tasks/pushNotificationConfig/set`).
-  - When the task status changes significantly (e.g., completes, fails, or requires input), the server can send an asynchronous notification (an HTTP POST request) to this client-provided webhook.
-  - This requires the server to advertise the `pushNotifications` capability in its Agent Card.
-  - Learn more about [Streaming & Asynchronous Operations](https://a2a-protocol.org/latest/topics/streaming-and-async/).
-
-## Agent Response: Task or Message [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#agent-response-task-or-message "Permanent link")
-
-See details in the [Life of a Task](https://a2a-protocol.org/latest/topics/life-of-a-task/).
-
-## Other Important Concepts [¶](https://a2a-protocol.org/latest/topics/key-concepts/\#other-important-concepts "Permanent link")
-
-- **Context ( `contextId`):** A server-generated identifier that can be used to logically group multiple related `Task` objects, providing context across a series of interactions.
-- **Transport and Format:** A2A communication occurs over HTTP(S). JSON-RPC 2.0 is used as the payload format for all requests and responses.
-- **Authentication & Authorization:** A2A relies on standard web security practices. Authentication requirements are declared in the Agent Card, and credentials (e.g., OAuth tokens, API keys) are typically passed via HTTP headers, separate from the A2A protocol messages themselves.
-  - Learn more about [Enterprise-Ready Features](https://a2a-protocol.org/latest/topics/enterprise-ready/).
-- **Agent Discovery:** The process by which clients find Agent Cards to learn about available A2A Servers and their capabilities.
-  - Learn more about [Agent Discovery](https://a2a-protocol.org/latest/topics/agent-discovery/).
-- **Extensions:** A2A allows agents to declare custom protocol extensions as part of their AgentCard.
-  - More documentation coming soon.
-
-By understanding these core components and mechanisms, developers can effectively design, implement, and utilize A2A for building interoperable and collaborative AI agent systems.
-
-## A2A Protocol Features
-[Skip to content](https://a2a-protocol.org/latest/topics/enterprise-ready/#enterprise-ready-features-for-a2a-agents)
-
-# Enterprise-Ready Features for A2A Agents [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#enterprise-ready-features-for-a2a-agents "Permanent link")
-
-The Agent2Agent (A2A) protocol is designed with enterprise requirements at its core. Instead of inventing new, proprietary standards for security and operations, A2A aims to integrate seamlessly with existing enterprise infrastructure and widely adopted best practices. A2A treats remote agents as standard, HTTP-based enterprise applications. This approach allows organizations to leverage their existing investments and expertise in security, monitoring, governance, and identity management.
-
-A key principle of A2A is that agents are typically "opaque" – they do not share internal memory, tools, or direct resource access with each other. This opacity naturally aligns with standard client/server security paradigms.
-
-## 1\. Transport Level Security (TLS) [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#1-transport-level-security-tls "Permanent link")
-
-Ensuring the confidentiality and integrity of data in transit is fundamental.
-
-- **HTTPS Mandate:** All A2A communication in production environments **MUST** occur over HTTPS.
-- **Modern TLS Standards:** Implementations **SHOULD** use modern TLS versions (TLS 1.2 or higher is recommended) with strong, industry-standard cipher suites to protect data from eavesdropping and tampering.
-- **Server Identity Verification:** A2A Clients **SHOULD** verify the A2A Server's identity by validating its TLS certificate against trusted certificate authorities (CAs) during the TLS handshake. This prevents man-in-the-middle attacks.
-
-## 2\. Authentication [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#2-authentication "Permanent link")
-
-A2A delegates authentication to standard web mechanisms, primarily relying on HTTP headers and established standards like OAuth2 and OpenID Connect. Authentication requirements are advertised by the A2A Server in its [Agent Card](https://a2a-protocol.org/latest/specification/#5-agent-discovery-the-agent-card).
-
-- **No In-Payload Identity:** A2A protocol payloads (JSON-RPC messages) do **not** carry user or client identity information. Identity is established at the transport/HTTP layer.
-- **Agent Card Declaration:** The A2A Server's `AgentCard` describes the authentication `schemes` it supports in its `security` field. Each named scheme in this field is an identifier specific to the card. The details for each named scheme, including the scheme type, can be provided in the `securitySchemes` field of the Agent Card. The supported names of the scheme types ("apiKey", "http", "oauth2", "openIdConnect") align with those defined in the [OpenAPI Specification for authentication](https://swagger.io/docs/specification/authentication/).
-- **Out-of-Band Credential Acquisition:** The A2A Client is responsible for obtaining the necessary credential materials (e.g., OAuth 2.0 tokens, either in JWT format or some other format; API keys; or other) through processes external to the A2A protocol itself. This could involve OAuth flows (authorization code, client credentials), secure key distribution, etc.
-- **HTTP Header Transmission:** Credentials **MUST** be transmitted in standard HTTP headers as per the requirements of the chosen authentication scheme (e.g., `Authorization: Bearer <token>`, `API-Key: <key_value>`).
-- **Server-Side Validation:** The A2A Server **MUST** authenticate **every** incoming request based on the credentials provided in the HTTP headers and its declared requirements.
-  - If authentication fails or is missing, the server **SHOULD** respond with standard HTTP status codes such as `401 Unauthorized` or `403 Forbidden`.
-  - A `401 Unauthorized` response **SHOULD** include a `WWW-Authenticate` header indicating the required scheme(s), guiding the client on how to authenticate correctly.
-- **In-Task Authentication (Secondary Credentials):** If an agent, during a task, requires additional credentials for a _different_ system (e.g., to access a specific tool on behalf of the user), A2A recommends:
-1. The A2A Server transitions the A2A task to the `input-required` state.
-2. The `TaskStatus.message` (often using a `DataPart`) should provide details about the required authentication for the secondary system, potentially using an `AuthenticationInfo`-like structure.
-3. The A2A Client then obtains these new credentials out-of-band for the secondary system. These credentials might be provided back to the A2A Server (if it's proxying the request) or used by the client to interact directly with the secondary system.
-
-## 3\. Authorization [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#3-authorization "Permanent link")
-
-Once a client is authenticated, the A2A Server is responsible for authorizing the request. Authorization logic is specific to the agent's implementation, the data it handles, and applicable enterprise policies.
-
-- **Granular Control:** Authorization **SHOULD** be applied based on the authenticated identity (which could represent an end user, a client application, or both).
-- **Skill-Based Authorization:** Access can be controlled on a per-skill basis, as advertised in the Agent Card. For example, specific OAuth scopes might grant an authenticated client access to invoke certain skills but not others.
-- **Data and Action-Level Authorization:** Agents that interact with backend systems, databases, or tools **MUST** enforce appropriate authorization before performing sensitive actions or accessing sensitive data through those underlying resources. The agent acts as a gatekeeper.
-- **Principle of Least Privilege:** Grant only the necessary permissions required for a client or user to perform their intended operations via the A2A interface.
-
-## 4\. Data Privacy and Confidentiality [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#4-data-privacy-and-confidentiality "Permanent link")
-
-- **Sensitivity Awareness:** Implementers must be acutely aware of the sensitivity of data exchanged in `Message` and `Artifact` parts of A2A interactions.
-- **Compliance:** Ensure compliance with relevant data privacy regulations (e.g., GDPR, CCPA, HIPAA, depending on the domain and data).
-- **Data Minimization:** Avoid including or requesting unnecessarily sensitive information in A2A exchanges.
-- **Secure Handling:** Protect data both in transit (via TLS, as mandated) and at rest (if persisted by agents) according to enterprise data security policies and regulatory requirements.
-
-## 5\. Tracing, Observability, and Monitoring [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#5-tracing-observability-and-monitoring "Permanent link")
-
-A2A's reliance on HTTP allows for straightforward integration with standard enterprise tracing, logging, and monitoring tools.
-
-- **Distributed Tracing:**
-  - A2A Clients and Servers **SHOULD** participate in distributed tracing systems (e.g., OpenTelemetry, Jaeger, Zipkin).
-  - Trace context (trace IDs, span IDs) **SHOULD** be propagated via standard HTTP headers (e.g., W3C Trace Context headers like `traceparent` and `tracestate`).
-  - This enables end-to-end visibility of requests as they flow across multiple agents and underlying services, which is invaluable for debugging and performance analysis.
-- **Comprehensive Logging:** Implement detailed logging on both client and server sides. Logs should include relevant identifiers such as `taskId`, `sessionId`, correlation IDs, and trace context to facilitate troubleshooting and auditing.
-- **Metrics:** A2A Servers should expose key operational metrics (e.g., request rates, error rates, task processing latency, resource utilization) to enable performance monitoring, alerting, and capacity planning. These can be integrated with systems like Prometheus or Google Cloud Monitoring.
-- **Auditing:** Maintain audit trails for significant events, such as task creation, critical state changes, and actions performed by agents, especially those involving sensitive data access, modifications, or high-impact operations.
-
-## 6\. API Management and Governance [¶](https://a2a-protocol.org/latest/topics/enterprise-ready/\#6-api-management-and-governance "Permanent link")
-
-For A2A Servers exposed externally, across organizational boundaries, or even within large enterprises, integration with API Management solutions is highly recommended. This can provide:
-
-- **Centralized Policy Enforcement:** Consistent application of security policies (authentication, authorization), rate limiting, and quotas.
-- **Traffic Management:** Load balancing, routing, and mediation.
-- **Analytics and Reporting:** Insights into agent usage, performance, and trends.
-- **Developer Portals:** Facilitate discovery of A2A-enabled agents, provide documentation (including Agent Cards), and streamline onboarding for client developers.
-
-By adhering to these enterprise-grade practices, A2A implementations can be deployed securely, reliably, and manageably within complex organizational environments, fostering trust and enabling scalable inter-agent collaboration.
-
-## Agent Discovery Methods
-[Skip to content](https://a2a-protocol.org/latest/topics/agent-discovery/#agent-discovery-in-a2a)
-
-# Agent Discovery in A2A [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#agent-discovery-in-a2a "Permanent link")
-
-For AI agents to collaborate using the Agent2Agent (A2A) protocol, they first need to find each other and understand what capabilities the other agents offer. A2A standardizes the format of an agent's self-description through the **[Agent Card](https://a2a-protocol.org/latest/specification/#5-agent-discovery-the-agent-card)**. However, the methods for discovering these Agent Cards can vary depending on the environment and requirements.
-
-## The Role of the Agent Card [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#the-role-of-the-agent-card "Permanent link")
-
-The Agent Card is a JSON document that serves as a digital "business card" for an A2A Server (the remote agent). It is crucial for discovery and initiating interaction. Key information typically included in an Agent Card:
-
-- **Identity:** `name`, `description`, `provider` information.
-- **Service Endpoint:** The `url` where the A2A service can be reached.
-- **A2A Capabilities:** Supported protocol features like `streaming` or `pushNotifications`.
-- **Authentication:** Required authentication `schemes` (e.g., "Bearer", "OAuth2") to interact with the agent.
-- **Skills:** A list of specific tasks or functions the agent can perform ( `AgentSkill` objects), including their `id`, `name`, `description`, `inputModes`, `outputModes`, and `examples`.
-
-Client agents parse the Agent Card to determine if a remote agent is suitable for a given task, how to structure requests for its skills, and how to communicate with it securely.
-
-## Discovery Strategies [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#discovery-strategies "Permanent link")
-
-Here are common strategies for how a client agent might discover the Agent Card of a remote agent:
-
-### 1\. Well-Known URI [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#1-well-known-uri "Permanent link")
-
-This is a recommended approach for public agents or agents intended for broad discoverability within a specific domain.
-
-- **Mechanism:** A2A Servers host their Agent Card at a standardized, "well-known" path on their domain.
-- **Standard Path:** `https://{agent-server-domain}/.well-known/agent-card.json` (following the principles of [RFC 8615](https://www.ietf.org/rfc/rfc8615.txt) for well-known URIs).
-- **Process:**
-1. A client agent knows or programmatically discovers the domain of a potential A2A Server (e.g., `smart-thermostat.example.com`).
-2. The client performs an HTTP `GET` request to `https://smart-thermostat.example.com/.well-known/agent-card.json`.
-3. If the Agent Card exists and is accessible, the server returns it as a JSON response.
-- **Advantages:** Simple, standardized, and enables automated discovery by crawlers or systems that can resolve domains. Effectively reduces the discovery problem to "find the agent's domain."
-- **Considerations:** Best suited for agents intended for open discovery or discovery within an organization that controls the domain. The endpoint serving the Agent Card may itself require authentication if the card contains sensitive information.
-
-### 2\. Curated Registries (Catalog-Based Discovery) [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#2-curated-registries-catalog-based-discovery "Permanent link")
-
-For enterprise environments, marketplaces, or specialized ecosystems, Agent Cards can be published to and discovered via a central registry or catalog.
-
-- **Mechanism:** An intermediary service (the registry) maintains a collection of Agent Cards. Clients query this registry to find agents based on various criteria (e.g., skills offered, tags, provider name, desired capabilities).
-- **Process:**
-1. A2A Servers (or their administrators) register their Agent Cards with the registry service. The mechanism for this registration is outside the scope of the A2A protocol itself.
-2. Client agents query the registry's API (e.g., "find agents with 'image-generation' skill that support streaming").
-3. The registry returns a list of matching Agent Cards or references to them.
-- **Advantages:**
-  - Centralized management, curation, and governance of available agents.
-  - Facilitates discovery based on functional capabilities rather than just domain names.
-  - Can implement access controls, policies, and trust mechanisms at the registry level.
-  - Enables scenarios like company-specific or team-specific agent catalogs, or public marketplaces of A2A-compliant agents.
-- **Considerations:** Requires an additional registry service. The A2A protocol does not currently define a standard API for such registries, though this is an area of potential future exploration and community standardization.
-
-### 3\. Direct Configuration / Private Discovery [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#3-direct-configuration-private-discovery "Permanent link")
-
-In many scenarios, especially within tightly coupled systems, for private agents, or during development and testing, clients might be directly configured with Agent Card information or a URL to fetch it.
-
-- **Mechanism:** The client application has hardcoded Agent Card details, reads them from a local configuration file, receives them through an environment variable, or fetches them from a private, proprietary API endpoint known to the client.
-- **Process:** This is highly specific to the application's deployment and configuration strategy.
-- **Advantages:** Simple and effective for known, static relationships between agents or when dynamic discovery is not a requirement.
-- **Considerations:** Less flexible for discovering new or updated agents dynamically. Changes to the remote agent's card might require re-configuration of the client. Proprietary API-based discovery is not standardized by A2A.
-
-## Securing Agent Cards [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#securing-agent-cards "Permanent link")
-
-Agent Cards themselves can sometimes contain information that should be protected, such as:
-
-- The `url` of an internal-only or restricted-access agent.
-- Details in the `authentication.credentials` field if it's used for scheme-specific, non-secret information (e.g., an OAuth token URL). Storing actual plaintext secrets in an Agent Card is **strongly discouraged**.
-- Descriptions of sensitive or internal skills.
-
-**Protection Mechanisms:**
-
-- **Access Control on the Endpoint:** The HTTP endpoint serving the Agent Card (whether it's the `/.well-known/agent-card.json` path, a registry API, or a custom URL) should be secured using standard web practices if the card is not intended for public, unauthenticated access.
-  - **mTLS:** Require mutual TLS for client authentication if appropriate for the trust model.
-  - **Network Restrictions:** Limit access to specific IP ranges, VPCs, or private networks.
-  - **Authentication:** Require standard HTTP authentication (e.g., OAuth 2.0 Bearer token, API Key) to access the Agent Card itself.
-- **Selective Disclosure by Registries:** Agent registries can implement logic to return different Agent Cards or varying levels of detail based on the authenticated client's identity and permissions. For example, a public query might return a limited card, while an authenticated partner query might receive a card with more details.
-
-It's crucial to remember that if an Agent Card were to contain sensitive data (again, **not recommended** for secrets), the card itself **must never** be available without strong authentication and authorization. The A2A protocol encourages authentication schemes where the client obtains dynamic credentials out-of-band, rather than relying on static secrets embedded in the Agent Card.
-
-## Future Considerations [¶](https://a2a-protocol.org/latest/topics/agent-discovery/\#future-considerations "Permanent link")
-
-The A2A community may explore standardizing aspects of registry interactions or more advanced, semantic discovery protocols in the future. Feedback and contributions in this area are welcome to enhance the discoverability and interoperability of A2A agents.
-
-## A2A and MCP Protocols
-[Skip to content](https://a2a-protocol.org/latest/topics/a2a-and-mcp/#a2a-and-mcp-complementary-protocols-for-agentic-systems)
-
-# A2A and MCP: Complementary Protocols for Agentic Systems [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#a2a-and-mcp-complementary-protocols-for-agentic-systems "Permanent link")
-
-## A2A ❤️ MCP [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#a2a-mcp "Permanent link")
-
-In the landscape of AI agent development, two key types of protocols are emerging to facilitate interoperability: those for connecting agents to **tools and resources**, and those for enabling **agent-to-agent collaboration**. The Agent2Agent (A2A) Protocol and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) address these distinct but related needs.
-
-**TL;DR;** Agentic applications need both A2A and MCP. We recommend MCP for tools and A2A for agents.
-
-## Why Different Protocols? [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#why-different-protocols "Permanent link")
-
-The distinction arises from the nature of what an agent interacts with:
-
-- **Tools & Resources:**
-  - These are typically primitives with well-defined, structured inputs and outputs. They perform specific, often stateless, functions (e.g., a calculator, a database query API, a weather lookup service).
-  - Their behavior is generally predictable and transactional.
-  - Interaction is often a single request-response cycle.
-- **Agents:**
-  - These are more autonomous systems. They can reason, plan, use multiple tools, maintain state over longer interactions, and engage in complex, often multi-turn dialogues to achieve novel or evolving tasks.
-  - Their behavior can be emergent and less predictable than a simple tool.
-  - Interaction often involves ongoing tasks, context sharing, and negotiation.
-
-Agentic applications need to leverage both: agents use tools to gather information and perform actions, and agents collaborate with other agents to tackle broader, more complex goals.
-
-## Model Context Protocol (MCP) [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#model-context-protocol-mcp "Permanent link")
-
-- **Focus:** MCP standardizes how AI models and agents connect to and interact with **tools, APIs, data sources, and other external resources.**
-- **Mechanism:** It defines a structured way to describe tool capabilities (akin to function calling in Large Language Models), pass inputs to them, and receive structured outputs.
-- **Use Cases:**
-  - Enabling an LLM to call an external API (e.g., fetch current stock prices).
-  - Allowing an agent to query a database with specific parameters.
-  - Connecting an agent to a set of predefined functions or services.
-- **Ecosystem:** MCP aims to create an ecosystem where tool providers can easily expose their services to various AI models and agent frameworks, and agent developers can easily consume these tools in a standardized way.
-
-## Agent2Agent Protocol (A2A) [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#agent2agent-protocol-a2a "Permanent link")
-
-- **Focus:** A2A standardizes how independent, often opaque, **AI agents communicate and collaborate with each other as peers.**
-- **Mechanism:** It provides an application-level protocol for agents to:
-  - Discover each other's high-level skills and capabilities (via Agent Cards).
-  - Negotiate interaction modalities (text, files, structured data).
-  - Manage shared, stateful, and potentially long-running tasks.
-  - Exchange conversational context, instructions, and complex, multi-part results.
-- **Use Cases:**
-  - A customer service agent delegating a complex billing inquiry to a specialized billing agent, maintaining context of the customer interaction.
-  - A travel planning agent coordinating with separate flight, hotel, and activity booking agents, managing a multi-stage booking process.
-  - Agents exchanging information and status updates for a collaborative project that evolves over time.
-- **Key Difference from Tool Interaction:** A2A allows for more dynamic, stateful, and potentially multi-modal interactions than typically seen with simple tool calls. Agents using A2A communicate _as agents_ (or on behalf of users) rather than just invoking a discrete function.
-
-## How A2A and MCP Complement Each Other [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#how-a2a-and-mcp-complement-each-other "Permanent link")
-
-A2A and MCP are not mutually exclusive; they are highly complementary and address different layers of an agentic system's interaction needs.
-
-![Diagram showing A2A and MCP working together. A User interacts with Agent A via A2A. Agent A interacts with Agent B via A2A. Agent B uses MCP to interact with Tool 1 and Tool 2.](https://a2a-protocol.org/latest/assets/a2a-mcp.png)
-
-_An agentic application might use A2A to communicate with other agents, while each agent internally uses MCP to interact with its specific tools and resources._
-
-### Example Scenario: The Auto Repair Shop [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#example-scenario-the-auto-repair-shop "Permanent link")
-
-> Consider an auto repair shop staffed by autonomous AI agent "mechanics" who use special-purpose tools (such as vehicle jacks, multimeters, and socket wrenches) to diagnose and repair problems. The workers often have to diagnose and repair problems they have not seen before. The repair process can involve extensive conversations with a customer, research, and working with part suppliers.
-
-1. **Customer Interaction (User-to-Agent via A2A):**
-   - A customer (or their primary assistant agent) uses A2A to communicate with the "Shop Manager" agent: _"My car is making a rattling noise."_
-   - The Shop Manager agent uses A2A for a multi-turn diagnostic conversation: _"Can you send a video of the noise?"_, _"I see some fluid leaking. How long has this been happening?"_
-2. **Internal Tool Usage (Agent-to-Tool via MCP):**
-   - The Mechanic agent, assigned the task by the Shop Manager, needs to diagnose the issue. It uses MCP to interact with its specialized tools:
-     - MCP call to a "Vehicle Diagnostic Scanner" tool: `scan_vehicle_for_error_codes(vehicle_id='XYZ123')`.
-     - MCP call to a "Repair Manual Database" tool: `get_repair_procedure(error_code='P0300', vehicle_make='Toyota', vehicle_model='Camry')`.
-     - MCP call to a "Platform Lift" tool: `raise_platform(height_meters=2)`.
-3. **Supplier Interaction (Agent-to-Agent via A2A):**
-   - The Mechanic agent determines a specific part is needed. It uses A2A to communicate with a "Parts Supplier" agent: _"Do you have part #12345 in stock for a Toyota Camry 2018?"_
-   - The Parts Supplier agent, also an A2A-compliant system, responds, potentially leading to an order.
-
-In this example:
-
-- **A2A** facilitates the higher-level, conversational, and task-oriented interactions between the customer and the shop, and between the shop's agents and external supplier agents.
-- **MCP** enables the mechanic agent to use its specific, structured tools to perform its diagnostic and repair functions.
-
-## Representing A2A Agents as MCP Resources [¶](https://a2a-protocol.org/latest/topics/a2a-and-mcp/\#representing-a2a-agents-as-mcp-resources "Permanent link")
-
-It's conceivable that an A2A Server (a remote agent) could also expose some of its skills as MCP-compatible resources, especially if those skills are well-defined and can be invoked in a more tool-like, stateless manner. In such a case, another agent might "discover" this A2A agent's specific skill via an MCP-style tool description (perhaps derived from its Agent Card).
-
-However, the primary strength of A2A lies in its support for more flexible, stateful, and collaborative interactions that go beyond typical tool invocation. A2A is about agents _partnering_ on tasks, while MCP is more about agents _using_ capabilities.
-
-By leveraging both A2A for inter-agent collaboration and MCP for tool integration, developers can build more powerful, flexible, and interoperable AI systems.
-
-## A2A Protocol Overview
-[Skip to content](https://a2a-protocol.org/latest/topics/what-is-a2a/#what-is-a2a)
-
-# What is A2A? [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#what-is-a2a "Permanent link")
-
-The Agent2Agent (A2A) Protocol is an open standard designed to solve a fundamental challenge in the rapidly evolving landscape of artificial intelligence: **how do AI agents, built by different teams, using different technologies, and owned by different organizations, communicate and collaborate effectively?**
-
-As AI agents become more specialized and capable, the need for them to work together on complex tasks increases. Imagine a user asking their primary AI assistant to plan an international trip. This single request might involve coordinating the capabilities of several specialized agents:
-
-1. An agent for flight bookings.
-2. Another agent for hotel reservations.
-3. A third for local tour recommendations and bookings.
-4. A fourth to handle currency conversion and travel advisories.
-
-Without a common communication protocol, integrating these diverse agents into a cohesive user experience is a significant engineering hurdle. Each integration would likely be a custom, point-to-point solution, making the system difficult to scale, maintain, and extend.
-
-## The A2A Solution [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#the-a2a-solution "Permanent link")
-
-A2A provides a standardized way for these independent, often "opaque" (black-box) agentic systems to interact. It defines:
-
-- **A common transport and format:** JSON-RPC 2.0 over HTTP(S) for how messages are structured and transmitted.
-- **Discovery mechanisms (Agent Cards):** How agents can advertise their capabilities and be found by other agents.
-- **Task management workflows:** How collaborative tasks are initiated, progressed, and completed. This includes support for tasks that may be long-running or require multiple turns of interaction.
-- **Support for various data modalities:** How agents exchange not just text, but also files, structured data (like forms), and potentially other rich media.
-- **Core principles for security and asynchronicity:** Guidelines for secure communication and handling tasks that might take significant time or involve human-in-the-loop processes.
-
-## Key Design Principles of A2A [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#key-design-principles-of-a2a "Permanent link")
-
-The development of A2A is guided by several core principles:
-
-- **Simplicity:** Leverage existing, well-understood standards like HTTP, JSON-RPC, and Server-Sent Events (SSE) where possible, rather than reinventing the wheel.
-- **Enterprise Readiness:** Address critical enterprise needs such as authentication, authorization, security, privacy, tracing, and monitoring from the outset by aligning with standard web practices.
-- **Asynchronous First:** Natively support long-running tasks and scenarios where agents or users might not be continuously connected, through mechanisms like streaming and push notifications.
-- **Modality Agnostic:** Allow agents to communicate using a variety of content types, enabling rich and flexible interactions beyond plain text.
-- **Opaque Execution:** Enable collaboration without requiring agents to expose their internal logic, memory, or proprietary tools. Agents interact based on declared capabilities and exchanged context, preserving intellectual property and enhancing security.
-
-## Benefits of Using A2A [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#benefits-of-using-a2a "Permanent link")
-
-Adopting A2A can lead to significant advantages:
-
-- **Increased Interoperability:** Break down silos between different AI agent ecosystems, allowing agents from various vendors and frameworks to work together.
-- **Enhanced Agent Capabilities:** Allow developers to create more sophisticated applications by composing the strengths of multiple specialized agents.
-- **Reduced Integration Complexity:** Standardize the "how" of agent communication, allowing teams to focus on the "what" – the value their agents provide.
-- **Fostering Innovation:** Encourage the development of a richer ecosystem of specialized agents that can readily plug into larger collaborative workflows.
-- **Future-Proofing:** Provide a flexible framework that can adapt as agent technologies continue to evolve.
-
-By establishing common ground for agent-to-agent communication, A2A aims to accelerate the adoption and utility of AI agents across diverse industries and applications, paving the way for more powerful and collaborative AI systems.
-
-## A2A Request Lifecycle [¶](https://a2a-protocol.org/latest/topics/what-is-a2a/\#a2a-request-lifecycle "Permanent link")
-
-Next, learn about the [Key Concepts](https://a2a-protocol.org/latest/topics/key-concepts/) that form the foundation of the A2A protocol.
-
-## A2A Python Tutorial
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/1-introduction/#python-quickstart-tutorial-building-an-a2a-agent)
-
-# Python Quickstart Tutorial: Building an A2A Agent [¶](https://a2a-protocol.org/latest/tutorials/python/1-introduction/\#python-quickstart-tutorial-building-an-a2a-agent "Permanent link")
-
-Welcome to the Agent2Agent (A2A) Python Quickstart Tutorial!
-
-In this tutorial, you will explore a simple "echo" A2A server using the Python SDK. This will introduce you to the fundamental concepts and components of an A2A server. You will then look at a more advanced example that integrates a Large Language Model (LLM).
-
-This hands-on guide will help you understand:
-
-- The basic concepts behind the A2A protocol.
-- How to set up a Python environment for A2A development using the SDK.
-- How Agent Skills and Agent Cards describe an agent.
-- How an A2A server handles tasks.
-- How to interact with an A2A server using a client.
-- How streaming capabilities and multi-turn interactions work.
-- How an LLM can be integrated into an A2A agent.
-
-By the end of this tutorial, you will have a functional understanding of A2A agents and a solid foundation for building or integrating A2A-compliant applications.
-
-## Tutorial Sections [¶](https://a2a-protocol.org/latest/tutorials/python/1-introduction/\#tutorial-sections "Permanent link")
-
-The tutorial is broken down into the following steps:
-
-1. **[Introduction (This Page)](https://a2a-protocol.org/latest/tutorials/python/1-introduction/)**
-2. **[Setup](https://a2a-protocol.org/latest/tutorials/python/2-setup/)**: Prepare your Python environment and the A2A SDK.
-3. **[Agent Skills & Agent Card](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/)**: Define what your agent can do and how it describes itself.
-4. **[The Agent Executor](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/)**: Understand how the agent logic is implemented.
-5. **[Starting the Server](https://a2a-protocol.org/latest/tutorials/python/5-start-server/)**: Run the Helloworld A2A server.
-6. **[Interacting with the Server](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/)**: Send requests to your agent.
-7. **[Streaming & Multi-Turn Interactions](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/)**: Explore advanced capabilities with the LangGraph example.
-8. **[Next Steps](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/)**: Explore further possibilities with A2A.
-
-Let's get started!
-
-## A2A SDK Setup
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/2-setup/#2-setup-your-environment)
-
-# 2\. Setup Your Environment [¶](https://a2a-protocol.org/latest/tutorials/python/2-setup/\#2-setup-your-environment "Permanent link")
-
-## Prerequisites [¶](https://a2a-protocol.org/latest/tutorials/python/2-setup/\#prerequisites "Permanent link")
-
-- Python 3.10 or higher.
-- Access to a terminal or command prompt.
-- Git, for cloning the repository.
-- A code editor (e.g., Visual Studio Code) is recommended.
-
-## Clone the Repository [¶](https://a2a-protocol.org/latest/tutorials/python/2-setup/\#clone-the-repository "Permanent link")
-
-If you haven't already, clone the A2A Samples repository:
-
-```md-code__content
-git clone https://github.com/a2aproject/a2a-samples.git -b main --depth 1
-cd a2a-samples
-
-```
-
-## Python Environment & SDK Installation [¶](https://a2a-protocol.org/latest/tutorials/python/2-setup/\#python-environment-sdk-installation "Permanent link")
-
-We recommend using a virtual environment for Python projects. The A2A Python SDK uses `uv` for dependency management, but you can use `pip` with `venv` as well.
-
-1. **Create and activate a virtual environment:**
-
-Using `venv` (standard library):
-
-
-
-[Mac/Linux](https://a2a-protocol.org/latest/tutorials/python/2-setup/#maclinux)[Windows](https://a2a-protocol.org/latest/tutorials/python/2-setup/#windows)
-
-
-
-
-
-
-
-
-
-```md-code__content
-python -m venv .venv
-source .venv/bin/activate
-
-```
-
-
-
-
-
-
-
-
-
-
-
-```md-code__content
-python -m venv .venv
-.venv\Scripts\activate
-
-```
-
-2. **Install needed Python dependencies along with the A2A SDK and its dependencies:**
-
-
-
-```md-code__content
-pip install -r samples/python/requirements.txt
-
-```
-
-
-## Verify Installation [¶](https://a2a-protocol.org/latest/tutorials/python/2-setup/\#verify-installation "Permanent link")
-
-After installation, you should be able to import the `a2a` package in a Python interpreter:
-
-```md-code__content
-python -c "import a2a; print('A2A SDK imported successfully')"
-
-```
-
-If this command runs without error and prints the success message, your environment is set up correctly.
-
-## Start A2A Server
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/5-start-server/#5-starting-the-server)
-
-# 5\. Starting the Server [¶](https://a2a-protocol.org/latest/tutorials/python/5-start-server/\#5-starting-the-server "Permanent link")
-
-Now that we have an Agent Card and an Agent Executor, we can set up and start the A2A server.
-
-The A2A Python SDK provides an `A2AStarletteApplication` class that simplifies running an A2A-compliant HTTP server. It uses [Starlette](https://www.starlette.io/) for the web framework and is typically run with an ASGI server like [Uvicorn](https://www.uvicorn.org/).
-
-## Server Setup in Helloworld [¶](https://a2a-protocol.org/latest/tutorials/python/5-start-server/\#server-setup-in-helloworld "Permanent link")
-
-Let's look at `__main__.py` again to see how the server is initialized and started.
-
-```md-code__content
-import uvicorn
-
-from a2a.server.apps import A2AStarletteApplication
-from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import (
-    AgentCapabilities,
-    AgentCard,
-    AgentSkill,
-)
-from agent_executor import (
-    HelloWorldAgentExecutor,  # type: ignore[import-untyped]
-)
-
-if __name__ == '__main__':
-    skill = AgentSkill(
-        id='hello_world',
-        name='Returns hello world',
-        description='just returns hello world',
-        tags=['hello world'],
-        examples=['hi', 'hello world'],
-    )
-
-    extended_skill = AgentSkill(
-        id='super_hello_world',
-        name='Returns a SUPER Hello World',
-        description='A more enthusiastic greeting, only for authenticated users.',
-        tags=['hello world', 'super', 'extended'],
-        examples=['super hi', 'give me a super hello'],
-    )
-
-    # This will be the public-facing agent card
-    public_agent_card = AgentCard(
-        name='Hello World Agent',
-        description='Just a hello world agent',
-        url='http://localhost:9999/',
-        version='1.0.0',
-        default_input_modes=['text'],
-        default_output_modes=['text'],
-        capabilities=AgentCapabilities(streaming=True),
-        skills=[skill],  # Only the basic skill for the public card
-        supports_authenticated_extended_card=True,
-    )
-
-    # This will be the authenticated extended agent card
-    # It includes the additional 'extended_skill'
-    specific_extended_agent_card = public_agent_card.model_copy(
-        update={
-            'name': 'Hello World Agent - Extended Edition',  # Different name for clarity
-            'description': 'The full-featured hello world agent for authenticated users.',
-            'version': '1.0.1',  # Could even be a different version
-            # Capabilities and other fields like url, default_input_modes, default_output_modes,
-            # supports_authenticated_extended_card are inherited from public_agent_card unless specified here.
-            'skills': [\
-                skill,\
-                extended_skill,\
-            ],  # Both skills for the extended card
-        }
-    )
-
-    request_handler = DefaultRequestHandler(
-        agent_executor=HelloWorldAgentExecutor(),
-        task_store=InMemoryTaskStore(),
-    )
-
-    server = A2AStarletteApplication(
-        agent_card=public_agent_card,
-        http_handler=request_handler,
-        extended_agent_card=specific_extended_agent_card,
-    )
-
-    uvicorn.run(server.build(), host='0.0.0.0', port=9999)
-
-```
-
-Let's break this down:
-
-1. **`DefaultRequestHandler`**:
-   - The SDK provides `DefaultRequestHandler`. This handler takes your `AgentExecutor` implementation (here, `HelloWorldAgentExecutor`) and a `TaskStore` (here, `InMemoryTaskStore`).
-   - It routes incoming A2A RPC calls to the appropriate methods on your executor (like `execute` or `cancel`).
-   - The `TaskStore` is used by the `DefaultRequestHandler` to manage the lifecycle of tasks, especially for stateful interactions, streaming, and resubscription. Even if your agent executor is simple, the handler needs a task store.
-2. **`A2AStarletteApplication`**:
-   - The `A2AStarletteApplication` class is instantiated with the `agent_card` and the `request_handler` (referred to as `http_handler` in its constructor).
-   - The `agent_card` is crucial because the server will expose it at the `/.well-known/agent-card.json` endpoint (by default).
-   - The `request_handler` is responsible for processing all incoming A2A method calls by interacting with your `AgentExecutor`.
-3. **`uvicorn.run(server_app_builder.build(), ...)`**:
-   - The `A2AStarletteApplication` has a `build()` method that constructs the actual Starlette application.
-   - This application is then run using `uvicorn.run()`, making your agent accessible over HTTP.
-   - `host='0.0.0.0'` makes the server accessible on all network interfaces on your machine.
-   - `port=9999` specifies the port to listen on. This matches the `url` in the `AgentCard`.
-
-## Running the Helloworld Server [¶](https://a2a-protocol.org/latest/tutorials/python/5-start-server/\#running-the-helloworld-server "Permanent link")
-
-Navigate to the `a2a-samples` directory in your terminal (if you're not already there) and ensure your virtual environment is activated.
-
-To run the Helloworld server:
-
-```md-code__content
-# from the a2a-samples directory
-python samples/python/agents/helloworld/__main__.py
-
-```
-
-You should see output similar to this, indicating the server is running:
-
-```md-code__content
-INFO:     Started server process [xxxxx]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:9999 (Press CTRL+C to quit)
-
-```
-
-Your A2A Helloworld agent is now live and listening for requests! In the next step, we'll interact with it.
-
-## Task Management Overview
-[Skip to content](https://a2a-protocol.org/latest/topics/life-of-a-task/#life-of-a-task)
-
-# Life of a Task [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#life-of-a-task "Permanent link")
-
-When a message is sent to an agent, it can choose to reply with either:
-
-- A stateless `Message`.
-- A stateful `Task` followed by zero or more `TaskStatusUpdateEvent` or `TaskArtifactUpdateEvent`.
-
-If the response is a `Message`, the interaction is completed. On the other hand, if the response is a `Task`, then the task will be processed by the agent, until it is in a interrupted state ( `input-required` or `auth-required`) or a terminal state ( `completed`, `cancelled`, `rejected` or `failed`).
-
-## Context [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#context "Permanent link")
-
-A `contextId` logically composes many `Task` objects and independent `Message` objects. If the A2A agent uses an LLM internally, it can utilize the `contextId` to manage the LLM context.
-
-For the first message, the agent responds with a server-generated `contextId`. If the agent creates a task, it will also include a server-generated `taskId`. Subsequent client messages can include the same `contextId` to continue the interaction, and optionally the `taskId` to continue a specific task.
-
-`contextId` allows collaboration over a goal or share a single contextual session across multiple tasks.
-
-## Agent: Message or a Task [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#agent-message-or-a-task "Permanent link")
-
-Messages can be used for trivial interactions which do not require long-running processing or collaboration. An agent can use messages to negotiate the acceptance of a task. Once an agent maps the intent of an incoming message to a supported capability, it can reply back with a `Task`.
-
-So conceptually there can be three levels of agents:
-
-1. An agent which always responds with `Message` objects only. Doesn't do complex state management, no long running execution and uses contextID to tie messages together. Agent most probably directly wraps around an LLM invocation and simple tools.
-2. Generates a `Task`, does more substantial work that can be tracked and runs over extended life time.
-3. Generates both `Message` and `Task` objects. Uses messages to negotiate agent capability and scope of work for a task. Then sends `Task` object to track its execution and collaborate over task states like more input-needed, error handling, etc.
-
-An agent can choose to always reply back with `Task` objects and model simple responses as tasks in `completed` state.
-
-## Task Refinements & Follow-ups [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#task-refinements-follow-ups "Permanent link")
-
-Clients may want to follow up with new asks based on the results of a task, and/or refine upon the task results. This can be modeled by starting another interaction using the same `contextId` as the original task. Clients can further hint the agent by providing the reference to the original task using `referenceTaskIds` in `Message` object. Agent would then respond with either a new `Task` or a `Message`.
-
-Once a task has reached a terminal state ( `completed`, `cancelled`, `rejected` or `failed`), it can't be restarted. There are some benefits to this:
-
-- **Task Immutability**: Clients can reliably reference tasks and their associated state, artifacts, and messages.
-  - This provides a clean mapping of inputs to outputs.
-  - Useful for mapping client orchestrator to task execution.
-- **Clear Unit of Work**: Every new request, refinement, or a follow-up becomes a distinct task, simplifying bookkeeping and allowing for granular tracking of an agent's work.
-  - Each artifact can be traced to a unit task.
-  - This unit of work can be referenced much more granularly by parent agents or other systems like agent optimizers. In case of restartable tasks, all the subsequent refinements are combined, and any reference to an interaction would need to resort to some kind of message index range.
-- **Easier Implementation**: No ambiguity for agent developers, whether to create a new task or restart an existing task. Once a task is in terminal state, any related subsequent interaction would need to be within a new task.
-
-### Parallel Follow-ups [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#parallel-follow-ups "Permanent link")
-
-Parallel work is supported by having agents create distinct, parallel tasks for each follow-up message sent within the same contextId. This allows clients to track individual tasks and create new dependent tasks as soon as a prerequisite task is complete.
-
-For example:
-
-```md-code__content
-Task 1: Book a flight to Helsinki.
-(After Task 1 finishes)
-Task 2: Based on Task 1, book a hotel.
-Task 3: Based on Task 1, book a snowmobile activity.
-(After Task 2 finishes, while Task 3 is still in progress)
-Task 4: Based on Task 2, add a spa reservation to the hotel booking.
-
-```
-
-### Referencing Previous Artifacts [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#referencing-previous-artifacts "Permanent link")
-
-The serving agent is responsible for inferring the relevant artifact from the referenced task or from the `contextId`. The serving agent, as the domain expert, is best suited to resolve ambiguity or identify missing information because they are the ones who generated the artifacts.
-
-If there is ambiguity (e.g., multiple artifacts could fit the request), the agent will ask the client for clarification by returning an input-required state. The client can then specify the artifact in its response. Client can optionally populate artifact reference {artifactId, taskId} in part metadata. This allows for linkage between inputs for follow-up tasks and previously generated artifacts.
-
-This approach allows for the client implementation to be simple.
-
-### Tracking Artifact Mutation [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#tracking-artifact-mutation "Permanent link")
-
-A follow up or refinement can result in an older artifact being modified and newer artifacts being generated. It would be good to know this linkage and maybe track all mutations of the artifact to make sure only the latest copy is used for future context. Something like a linked list, with the head as the latest version of the task result.
-
-But the client is best suited, as well as is the real judge of what it considers as an acceptable result. And in fact can reject the mutation as well. Hence, the serving agent should not own this linkage and hence this linkage does not need to be part of A2A protocol spec. Clients can maintain the linkage on their end and show the latest version to the user.
-
-To help with the tracking, the serving agent should maintain the same artifact-name when generating a refinement on the original artifact.
-
-For follow-up or refinement tasks, the client is best suited to refer to the "latest" or what it considers to be the intended artifact to be refined upon. If the artifact reference is not explicitly specified, the serving agent can:
-
-- Use context to figure out the latest artifact.
-- Or in case of ambiguity or context not supported, agent can use `input-required` task state.
-
-### Example Follow-up [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#example-follow-up "Permanent link")
-
-#### Client sends message to agent [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#client-sends-message-to-agent "Permanent link")
-
-```md-code__content
-{
-  "jsonrpc": "2.0",
-  "id": "req-001",
-  "method": "message/send",
-  "params": {
-    "message": {
-      "role": "user",
-      "parts": [\
-        {\
-          "kind": "text",\
-          "text": "Generate an image of a sailboat on the ocean."\
-        }\
-      ],
-      "messageId": "msg-user-001"
-    }
-  }
-}
-
-```
-
-#### Agent responds with boat image [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#agent-responds-with-boat-image "Permanent link")
-
-```md-code__content
-{
-  "jsonrpc": "2.0",
-  "id": "req-001",
-  "result": {
-    "id": "task-boat-gen-123",
-    "contextId": "ctx-conversation-abc",
-    "status": {
-      "state": "completed",
-    },
-    "artifacts": [\
-      {\
-        "artifactId": "artifact-boat-v1-xyz",\
-        "name": "sailboat_image.png",\
-        "description": "A generated image of a sailboat on the ocean.",\
-        "parts": [\
-          {\
-            "kind": "file",\
-            "file": {\
-              "name": "sailboat_image.png",\
-              "mimeType": "image/png",\
-              "bytes": "<base64_encoded_png_data_of_a_sailboat>"\
-            }\
-          }\
-        ]\
-      }\
-    ],
-    "kind": "task"
-  }
-}
-
-```
-
-#### Client asks for coloring the boat red [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#client-asks-for-coloring-the-boat-red "Permanent link")
-
-Refers to previous taskID and uses same contextId.
-
-```md-code__content
-{
-  "jsonrpc": "2.0",
-  "id": "req-002",
-  "method": "message/send",
-  "params": {
-    "message": {
-      "role": "user",
-      "messageId": "msg-user-002",
-      "contextId": "ctx-conversation-abc", // Same contextId
-      "referenceTaskIds": ["task-boat-gen-123"] // Optional: Referencing the previous task
-      "parts": [\
-        {\
-          "kind": "text",\
-          "text": "That's great! Can you make the sailboat red?"\
-          // Optional: In case the agent asked for actual relevant artifact.\
-          // Client could provide the artifact data in parts.\
-          // Also it could add metadata to the part to\
-          // reference the specific artifact.\
-          // "metadata": {\
-          //   "referenceArtifacts: [\
-          //      {\
-          //        "artifactId": "artifact-boat-v1-xyz",\
-          //        "taskId": "task-boat-gen-123"\
-          //      }\
-          //   ]\
-          // }\
-        }\
-      ],
-    }
-  }
-}
-
-```
-
-#### Agent responds with new image artifact [¶](https://a2a-protocol.org/latest/topics/life-of-a-task/\#agent-responds-with-new-image-artifact "Permanent link")
-
-- Creates new task in same contextId.
-- Boat image artifact has same name. but a new artifactId.
-
-```md-code__content
-{
-  "jsonrpc": "2.0",
-  "id": "req-002",
-  "result": {
-    "id": "task-boat-color-456", // New task ID
-    "contextId": "ctx-conversation-abc", // Same contextId
-    "status": {
-      "state": "completed",
-    },
-    "artifacts": [\
-      {\
-        "artifactId": "artifact-boat-v2-red-pqr", // New artifactId\
-        "name": "sailboat_image.png", // Same name as the original artifact\
-        "description": "A generated image of a red sailboat on the ocean.",\
-        "parts": [\
-          {\
-            "kind": "file",\
-            "file": {\
-              "name": "sailboat_image.png",\
-              "mimeType": "image/png",\
-              "bytes": "<base64_encoded_png_data_of_a_RED_sailboat>"\
-            }\
-          }\
-        ]\
-      }\
-    ],
-    "kind": "task"
-  }
-}
-
-```
-
-## Agent Executor Tutorial
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/#4-the-agent-executor)
-
-# 4\. The Agent Executor [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#4-the-agent-executor "Permanent link")
-
-The core logic of how an A2A agent processes requests and generates responses/events is handled by an **Agent Executor**. The A2A Python SDK provides an abstract base class `a2a.server.agent_execution.AgentExecutor` that you implement.
-
-## `AgentExecutor` Interface [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#agentexecutor-interface "Permanent link")
-
-The `AgentExecutor` class defines two primary methods:
-
-- `async def execute(self, context: RequestContext, event_queue: EventQueue)`: Handles incoming requests that expect a response or a stream of events. It processes the user's input (available via `context`) and uses the `event_queue` to send back `Message`, `Task`, `TaskStatusUpdateEvent`, or `TaskArtifactUpdateEvent` objects.
-- `async def cancel(self, context: RequestContext, event_queue: EventQueue)`: Handles requests to cancel an ongoing task.
-
-The `RequestContext` provides information about the incoming request, such as the user's message and any existing task details. The `EventQueue` is used by the executor to send events back to the client.
-
-## Helloworld Agent Executor [¶](https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/\#helloworld-agent-executor "Permanent link")
-
-Let's look at `agent_executor.py`. It defines `HelloWorldAgentExecutor`.
-
-1. **The Agent ( `HelloWorldAgent`)**:
-    This is a simple helper class that encapsulates the actual "business logic".
-
-
-
-```md-code__content
-class HelloWorldAgent:
-       """Hello World Agent."""
-
-       async def invoke(self) -> str:
-           return 'Hello World'
-
-```
-
-
-
-It has a simple `invoke` method that returns the string "Hello World".
-
-2. **The Executor ( `HelloWorldAgentExecutor`)**:
-    This class implements the `AgentExecutor` interface.
-   - **`__init__`**:
-
-
-
-     ```md-code__content
-     class HelloWorldAgentExecutor(AgentExecutor):
-         """Test AgentProxy Implementation."""
-
-         def __init__(self):
-             self.agent = HelloWorldAgent()
-
-     ```
-
-
-
-     It instantiates the `HelloWorldAgent`.
-
-   - **`execute`**:
-
-
-
-     ```md-code__content
-     async def execute(
-         self,
-         context: RequestContext,
-         event_queue: EventQueue,
-     ) -> None:
-         result = await self.agent.invoke()
-         await event_queue.enqueue_event(new_agent_text_message(result))
-
-     ```
-
-
-
-     When a `message/send` or `message/stream` request comes in (both are handled by `execute` in this simplified executor):
-     1. It calls `self.agent.invoke()` to get the "Hello World" string.
-     2. It creates an A2A `Message` object using the `new_agent_text_message` utility function.
-     3. It enqueues this message onto the `event_queue`. The underlying `DefaultRequestHandler` will then process this queue to send the response(s) to the client. For a single message like this, it will result in a single response for `message/send` or a single event for `message/stream` before the stream closes.
-   - **`cancel`**:
-      The Helloworld example's `cancel` method simply raises an exception, indicating that cancellation is not supported for this basic agent.
-
-
-
-     ```md-code__content
-     async def cancel(
-         self, context: RequestContext, event_queue: EventQueue
-     ) -> None:
-         raise Exception('cancel not supported')
-
-     ```
-
-The `AgentExecutor` acts as the bridge between the A2A protocol (managed by the request handler and server application) and your agent's specific logic. It receives context about the request and uses an event queue to communicate results or updates back.
-
-## A2A Python SDK Tutorial
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/#next-steps)
-
-# Next Steps [¶](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/\#next-steps "Permanent link")
-
-Congratulations on completing the A2A Python SDK Tutorial! You've learned how to:
-
-- Set up your environment for A2A development.
-- Define Agent Skills and Agent Cards using the SDK's types.
-- Implement a basic HelloWorld A2A server and client.
-- Understand and implement streaming capabilities.
-- Integrate a more complex agent using LangGraph, demonstrating task state management and tool use.
-
-You now have a solid foundation for building and integrating your own A2A-compliant agents.
-
-## Where to Go From Here? [¶](https://a2a-protocol.org/latest/tutorials/python/8-next-steps/\#where-to-go-from-here "Permanent link")
-
-Here are some ideas and resources to continue your A2A journey:
-
-- **Explore Other Examples:**
-  - Check out the other examples in the `a2a-samples/samples/` directory in the [A2A GitHub repository](https://github.com/a2aproject/a2a-samples/tree/main/samples) for more complex agent integrations and features.
-  - The main A2A repository also has [samples for other languages and frameworks](https://github.com/a2aproject/A2A/tree/main/samples).
-- **Deepen Your Protocol Understanding:**
-  - 📚 Read the complete [A2A Protocol Documentation site](https://google.github.io/A2A/) for a comprehensive overview.
-  - 📝 Review the detailed [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/) to understand the nuances of all data structures and RPC methods.
-- **Review Key A2A Topics:**
-  - [A2A and MCP](https://a2a-protocol.org/latest/topics/a2a-and-mcp/): Understand how A2A complements the Model Context Protocol for tool usage.
-  - [Enterprise-Ready Features](https://a2a-protocol.org/latest/topics/enterprise-ready/): Learn about security, observability, and other enterprise considerations.
-  - [Streaming & Asynchronous Operations](https://a2a-protocol.org/latest/topics/streaming-and-async/): Get more details on SSE and push notifications.
-  - [Agent Discovery](https://a2a-protocol.org/latest/topics/agent-discovery/): Explore different ways agents can find each other.
-- **Build Your Own Agent:**
-  - Try creating a new A2A agent using your favorite Python agent framework (like LangChain, CrewAI, AutoGen, Semantic Kernel, or a custom solution).
-  - Implement the `a2a.server.AgentExecutor` interface to bridge your agent's logic with the A2A protocol.
-  - Think about what unique skills your agent could offer and how its Agent Card would represent them.
-- **Experiment with Advanced Features:**
-  - Implement robust task management with a persistent `TaskStore` if your agent handles long-running or multi-session tasks.
-  - Explore implementing push notifications if your agent's tasks are very long-lived.
-  - Consider more complex input and output modalities (e.g., handling file uploads/downloads, or structured data via `DataPart`).
-- **Contribute to the A2A Community:**
-  - Join the discussions on the [A2A GitHub Discussions page](https://github.com/a2aproject/A2A/discussions).
-  - Report issues or suggest improvements via [GitHub Issues](https://github.com/a2aproject/A2A/issues).
-  - Consider contributing code, examples, or documentation. See the [CONTRIBUTING.md](https://github.com/a2aproject/A2A/blob/main/CONTRIBUTING.md) guide.
-
-The A2A protocol aims to foster an ecosystem of interoperable AI agents. By building and sharing A2A-compliant agents, you can be a part of this exciting development!
-
-## LangGraph Streaming Tutorial
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/#7-streaming-multi-turn-interactions-langgraph-example)
-
-# 7\. Streaming & Multi-Turn Interactions (LangGraph Example) [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#7-streaming-multi-turn-interactions-langgraph-example "Permanent link")
-
-The Helloworld example demonstrates the basic mechanics of A2A. For more advanced features like robust streaming, task state management, and multi-turn conversations powered by an LLM, we'll turn to the LangGraph example located in [`a2a-samples/samples/python/agents/langgraph/`](https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/langgraph).
-
-This example features a "Currency Agent" that uses the Gemini model via LangChain and LangGraph to answer currency conversion questions.
-
-## Setting up the LangGraph Example [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#setting-up-the-langgraph-example "Permanent link")
-
-1. Create a [Gemini API Key](https://ai.google.dev/gemini-api/docs/api-key), if you don't already have one.
-
-2. **Environment Variable:**
-
-Create a `.env` file in the `a2a-samples/samples/python/agents/langgraph/` directory:
-
-
-
-```md-code__content
-echo "GOOGLE_API_KEY=YOUR_API_KEY_HERE" > .env
-
-```
-
-
-
-Replace `YOUR_API_KEY_HERE` with your actual Gemini API key.
-
-3. **Install Dependencies (if not already covered):**
-
-The `langgraph` example has its own `pyproject.toml` which includes dependencies like `langchain-google-genai` and `langgraph`. When you installed the SDK from the `a2a-samples` root using `pip install -e .[dev]`, this should have also installed the dependencies for the workspace examples, including `langgraph-example`. If you encounter import errors, ensure your primary SDK installation from the root directory was successful.
-
-
-## Running the LangGraph Server [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#running-the-langgraph-server "Permanent link")
-
-Navigate to the `a2a-samples/samples/python/agents/langgraph/app` directory in your terminal and ensure your virtual environment (from the SDK root) is activated.
-
-Start the LangGraph agent server:
-
-```md-code__content
-python __main__.py
-
-```
-
-This will start the server, usually on `http://localhost:10000`.
-
-## Interacting with the LangGraph Agent [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#interacting-with-the-langgraph-agent "Permanent link")
-
-Open a **new terminal window**, activate your virtual environment, and navigate to `a2a-samples/samples/python/agents/langgraph/app`.
-
-Run its test client:
-
-```md-code__content
-python test_client.py
-
-```
-
-Now, you can shut down the server by typing Ctrl+C in the terminal window where `__main__.py` is running.
-
-## Key Features Demonstrated [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#key-features-demonstrated "Permanent link")
-
-The `langgraph` example showcases several important A2A concepts:
-
-1. **LLM Integration**:
-   - `agent.py` defines `CurrencyAgent`. It uses `ChatGoogleGenerativeAI` and LangGraph's `create_react_agent` to process user queries.
-   - This demonstrates how a real LLM can power the agent's logic.
-2. **Task State Management**:
-   - `samples/langgraph/__main__.py` initializes a `DefaultRequestHandler` with an `InMemoryTaskStore`.
-
-
-
-     ```md-code__content
-     httpx_client = httpx.AsyncClient()
-     push_config_store = InMemoryPushNotificationConfigStore()
-     push_sender = BasePushNotificationSender(httpx_client=httpx_client,
-                     config_store=push_config_store)
-     request_handler = DefaultRequestHandler(
-         agent_executor=CurrencyAgentExecutor(),
-         task_store=InMemoryTaskStore(),
-         push_config_store=push_config_store,
-         push_sender= push_sender
-     )
-     server = A2AStarletteApplication(
-         agent_card=agent_card, http_handler=request_handler
-     )
-
-     uvicorn.run(server.build(), host=host, port=port)
-
-     ```
-
-   - The `CurrencyAgentExecutor` (in `samples/langgraph/agent_executor.py`), when its `execute` method is called by the `DefaultRequestHandler`, interacts with the `RequestContext` which contains the current task (if any).
-
-   - For `message/send`, the `DefaultRequestHandler` uses the `TaskStore` to persist and retrieve task state across interactions. The response to `message/send` will be a full `Task` object if the agent's execution flow involves multiple steps or results in a persistent task.
-   - The `test_client.py`'s `run_single_turn_test` demonstrates getting a `Task` object back and then querying it using `get_task`.
-3. **Streaming with `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent`**:
-   - The `execute` method in `CurrencyAgentExecutor` is responsible for handling both non-streaming and streaming requests, orchestrated by the `DefaultRequestHandler`.
-   - As the LangGraph agent processes the request (which might involve calling tools like `get_exchange_rate`), the `CurrencyAgentExecutor` enqueues different types of events onto the `EventQueue`:
-     - `TaskStatusUpdateEvent`: For intermediate updates (e.g., "Looking up exchange rates...", "Processing the exchange rates.."). The `final` flag on these events is `False`.
-     - `TaskArtifactUpdateEvent`: When the final answer is ready, it's enqueued as an artifact. The `lastChunk` flag is `True`.
-     - A final `TaskStatusUpdateEvent` with `state=TaskState.completed` and `final=True` is sent to signify the end of the task for streaming.
-   - The `test_client.py`'s `run_streaming_test` function will print these individual event chunks as they are received from the server.
-4. **Multi-Turn Conversation ( `TaskState.input_required`)**:
-   - The `CurrencyAgent` can ask for clarification if a query is ambiguous (e.g., user asks "how much is 100 USD?").
-   - When this happens, the `CurrencyAgentExecutor` will enqueue a `TaskStatusUpdateEvent` where `status.state` is `TaskState.input_required` and `status.message` contains the agent's question (e.g., "To which currency would you like to convert?"). This event will have `final=True` for the current interaction stream.
-   - The `test_client.py`'s `run_multi_turn_test` function demonstrates this:
-     - It sends an initial ambiguous query.
-     - The agent responds (via the `DefaultRequestHandler` processing the enqueued events) with a `Task` whose status is `input_required`.
-     - The client then sends a second message, including the `taskId` and `contextId` from the first turn's `Task` response, to provide the missing information ("in GBP"). This continues the same task.
-
-## Exploring the Code [¶](https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/\#exploring-the-code "Permanent link")
-
-Take some time to look through these files:
-
-- `__main__.py`: Server setup using `A2AStarletteApplication` and `DefaultRequestHandler`. Note the `AgentCard` definition includes `capabilities.streaming=True`.
-- `agent.py`: The `CurrencyAgent` with LangGraph, LLM model, and tool definitions.
-- `agent_executor.py`: The `CurrencyAgentExecutor` implementing the `execute` (and `cancel`) method. It uses the `RequestContext` to understand the ongoing task and the `EventQueue` to send back various events ( `TaskStatusUpdateEvent`, `TaskArtifactUpdateEvent`, new `Task` object implicitly via the first event if no task exists).
-- `test_client.py`: Demonstrates various interaction patterns, including retrieving task IDs and using them for multi-turn conversations.
-
-This example provides a much richer illustration of how A2A facilitates complex, stateful, and asynchronous interactions between agents.
-
-## Interacting with A2A Server
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#6-interacting-with-the-server)
-
-# 6\. Interacting with the Server [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#6-interacting-with-the-server "Permanent link")
-
-With the Helloworld A2A server running, let's send some requests to it. The SDK includes a client ( `A2AClient`) that simplifies these interactions.
-
-## The Helloworld Test Client [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#the-helloworld-test-client "Permanent link")
-
-The `test_client.py` script demonstrates how to:
-
-1. Fetch the Agent Card from the server.
-2. Create an `A2AClient` instance.
-3. Send both non-streaming ( `message/send`) and streaming ( `message/stream`) requests.
-
-Open a **new terminal window**, activate your virtual environment, and navigate to the `a2a-samples` directory.
-
-Activate virtual environment (Be sure to do this in the same directory where you created the virtual environment):
-
-[Mac/Linux](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#maclinux)[Windows](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/#windows)
-
-```md-code__content
-source .venv/bin/activate
-
-```
-
-```md-code__content
-.venv\Scripts\activate
-
-```
-
-Run the test client:
-
-```md-code__content
-# from the a2a-samples directory
-python samples/python/agents/helloworld/test_client.py
-
-```
-
-## Understanding the Client Code [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#understanding-the-client-code "Permanent link")
-
-Let's look at key parts of `test_client.py`:
-
-1. **Fetching the Agent Card & Initializing the Client**:
-
-
-
-```md-code__content
-base_url = 'http://localhost:9999'
-
-async with httpx.AsyncClient() as httpx_client:
-       # Initialize A2ACardResolver
-       resolver = A2ACardResolver(
-           httpx_client=httpx_client,
-           base_url=base_url,
-           # agent_card_path uses default, extended_agent_card_path also uses default
-       )
-
-```
-
-
-
-The `A2ACardResolver` class is a convenience. It first fetches the `AgentCard` from the server's `/.well-known/agent-card.json` endpoint (based on the provided base URL) and then initializes the client with it.
-
-2. **Sending a Non-Streaming Message ( `send_message`)**:
-
-
-
-```md-code__content
-client = A2AClient(
-       httpx_client=httpx_client, agent_card=final_agent_card_to_use
-)
-logger.info('A2AClient initialized.')
-
-send_message_payload: dict[str, Any] = {
-       'message': {
-           'role': 'user',
-           'parts': [\
-               {'kind': 'text', 'text': 'how much is 10 USD in INR?'}\
-           ],
-           'messageId': uuid4().hex,
-       },
-}
-request = SendMessageRequest(
-       id=str(uuid4()), params=MessageSendParams(**send_message_payload)
-)
-
-response = await client.send_message(request)
-print(response.model_dump(mode='json', exclude_none=True))
-
-```
-
-
-   - The `send_message_payload` constructs the data for `MessageSendParams`.
-   - This is wrapped in a `SendMessageRequest`.
-   - It includes a `message` object with the `role` set to "user" and the content in `parts`.
-   - The Helloworld agent's `execute` method will enqueue a single "Hello World" message. The `DefaultRequestHandler` will retrieve this and send it as the response.
-   - The `response` will be a `SendMessageResponse` object, which contains either a `SendMessageSuccessResponse` (with the agent's `Message` as the result) or a `JSONRPCErrorResponse`.
-3. **Handling Task IDs (Illustrative Note for Helloworld)**:
-
-The Helloworld client ( `test_client.py`) doesn't attempt `get_task` or `cancel_task` directly because the simple Helloworld agent's `execute` method, when called via `message/send`, results in the `DefaultRequestHandler` returning a direct `Message` response rather than a `Task` object. More complex agents that explicitly manage tasks (like the LangGraph example) would return a `Task` object from `message/send`, and its `id` could then be used for `get_task` or `cancel_task`.
-
-4. **Sending a Streaming Message ( `send_message_streaming`)**:
-
-
-
-```md-code__content
-streaming_request = SendStreamingMessageRequest(
-       id=str(uuid4()), params=MessageSendParams(**send_message_payload)
-)
-
-stream_response = client.send_message_streaming(streaming_request)
-
-async for chunk in stream_response:
-       print(chunk.model_dump(mode='json', exclude_none=True))
-
-```
-
-
-   - This method calls the agent's `message/stream` endpoint. The `DefaultRequestHandler` will invoke the `HelloWorldAgentExecutor.execute` method.
-   - The `execute` method enqueues one "Hello World" message, and then the event queue is closed.
-   - The client will receive this single message as one `SendStreamingMessageResponse` event, and then the stream will terminate.
-   - The `stream_response` is an `AsyncGenerator`.
-
-## Expected Output [¶](https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/\#expected-output "Permanent link")
-
-When you run `test_client.py`, you'll see JSON outputs for:
-
-- The non-streaming response (a single "Hello World" message).
-- The streaming response (a single "Hello World" message as one chunk, after which the stream ends).
-
-The `id` fields in the output will vary with each run.
-
-```md-code__content
-// Non-streaming response
-{"jsonrpc":"2.0","id":"xxxxxxxx","result":{"type":"message","role":"agent","parts":[{"type":"text","text":"Hello World"}],"messageId":"yyyyyyyy"}}
-// Streaming response (one chunk)
-{"jsonrpc":"2.0","id":"zzzzzzzz","result":{"type":"message","role":"agent","parts":[{"type":"text","text":"Hello World"}],"messageId":"wwwwwwww","final":true}}
-
-```
-
-_(Actual IDs like `xxxxxxxx`, `yyyyyyyy`, `zzzzzzzz`, `wwwwwwww` will be different UUIDs/request IDs)_
-
-This confirms your server is correctly handling basic A2A interactions with the updated SDK structure!
-
-Now you can shut down the server by typing Ctrl+C in the terminal window where `__main__.py` is running.
-
-## Agent Skills Overview
-[Skip to content](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/#3-agent-skills-agent-card)
-
-# 3\. Agent Skills & Agent Card [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#3-agent-skills-agent-card "Permanent link")
-
-Before an A2A agent can do anything, it needs to define what it _can_ do (its skills) and how other agents or clients can find out about these capabilities (its Agent Card).
-
-We'll use the `helloworld` example located in [`a2a-samples/samples/python/agents/helloworld/`](https://github.com/a2aproject/a2a-samples/tree/main/samples/python/agents/helloworld).
-
-## Agent Skills [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#agent-skills "Permanent link")
-
-An **Agent Skill** describes a specific capability or function the agent can perform. It's a building block that tells clients what kinds of tasks the agent is good for.
-
-Key attributes of an `AgentSkill` (defined in `a2a.types`):
-
-- `id`: A unique identifier for the skill.
-- `name`: A human-readable name.
-- `description`: A more detailed explanation of what the skill does.
-- `tags`: Keywords for categorization and discovery.
-- `examples`: Sample prompts or use cases.
-- `inputModes` / `outputModes`: Supported Media Types for input and output (e.g., "text/plain", "application/json").
-
-In `__main__.py`, you can see how a skill for the Helloworld agent is defined:
-
-```md-code__content
-skill = AgentSkill(
-    id='hello_world',
-    name='Returns hello world',
-    description='just returns hello world',
-    tags=['hello world'],
-    examples=['hi', 'hello world'],
-)
-
-```
-
-This skill is very simple: it's named "Returns hello world" and primarily deals with text.
-
-## Agent Card [¶](https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/\#agent-card "Permanent link")
-
-The **Agent Card** is a JSON document that an A2A Server makes available, typically at a `.well-known/agent-card.json` endpoint. It's like a digital business card for the agent.
-
-Key attributes of an `AgentCard` (defined in `a2a.types`):
-
-- `name`, `description`, `version`: Basic identity information.
-- `url`: The endpoint where the A2A service can be reached.
-- `capabilities`: Specifies supported A2A features like `streaming` or `pushNotifications`.
-- `defaultInputModes` / `defaultOutputModes`: Default Media Types for the agent.
-- `skills`: A list of `AgentSkill` objects that the agent offers.
-
-The `helloworld` example defines its Agent Card like this:
-
-```md-code__content
-# This will be the public-facing agent card
-public_agent_card = AgentCard(
-    name='Hello World Agent',
-    description='Just a hello world agent',
-    url='http://localhost:9999/',
-    version='1.0.0',
-    default_input_modes=['text'],
-    default_output_modes=['text'],
-    capabilities=AgentCapabilities(streaming=True),
-    skills=[skill],  # Only the basic skill for the public card
-    supports_authenticated_extended_card=True,
-)
-
-```
-
-This card tells us the agent is named "Hello World Agent", runs at `http://localhost:9999/`, supports text interactions, and has the `hello_world` skill. It also indicates public authentication, meaning no specific credentials are required.
-
-Understanding the Agent Card is crucial because it's how a client discovers an agent and learns how to interact with it.
