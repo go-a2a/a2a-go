@@ -875,6 +875,27 @@ type TaskStatus struct {
 	Timestamp string `json:"timestamp,omitzero"`
 }
 
+type SecurityScope string
+
+// SecurityScopes slice of [SecurityScope].
+type SecurityScopes []SecurityScope
+
+func NewSecurityScopes(scopes ...string) SecurityScopes {
+	ss := make(SecurityScopes, len(scopes))
+	for i, s := range scopes {
+		ss[i] = SecurityScope(s)
+	}
+	return ss
+}
+
+func (ss SecurityScopes) AsSlices() []string {
+	scopes := make([]string, len(ss))
+	for i, s := range ss {
+		scopes[i] = string(s)
+	}
+	return scopes
+}
+
 // AgentCard represents an AgentCard conveys key information about an agent.
 type AgentCard struct {
 	// AdditionalInterfaces contains announcement of additional supported transports.
@@ -911,9 +932,11 @@ type AgentCard struct {
 	// Provider is the service provider of the agent.
 	Provider *AgentProvider `json:"provider,omitzero"`
 	// Security contains security requirements for contacting the agent.
-	Security []map[string][]string `json:"security,omitzero"`
+	Security []map[string]SecurityScopes `json:"security,omitzero"`
 	// SecuritySchemes contains security scheme details used for authenticating with this agent.
 	SecuritySchemes map[string]SecurityScheme `json:"securitySchemes,omitzero"`
+	// Signatures is the JSON Web Signatures computed for this AgentCard.
+	Signatures *AgentCardSignature `json:"signatures,omitzero"`
 	// Skills contains the skills that are units of capability that an agent can perform.
 	Skills []*AgentSkill `json:"skills"`
 	// SupportsAuthenticatedExtendedCard indicates if the agent supports providing an extended
@@ -926,6 +949,10 @@ type AgentCard struct {
 	// Example: "1.0.0"
 	Version string `json:"version"`
 }
+
+var _ Result = (*AgentCard)(nil)
+
+func (e AgentCard) GetTaskID() string { return "" }
 
 // MarshalJSON implements json.Marshaler for AgentCard
 func (a *AgentCard) MarshalJSON() ([]byte, error) {

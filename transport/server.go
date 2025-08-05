@@ -27,6 +27,7 @@ import (
 // Server provides methods for handling incoming requests from A2A clients.
 type Server interface {
 	Connect(ctx context.Context, t Transport) (*ServerSession, error)
+	AgentCard() *a2a.AgentCard
 	ServerSendingMethodHandler() any
 	ServerReceivingMethodHandler() any
 
@@ -39,6 +40,7 @@ type Server interface {
 	ListTasksPushNotificationConfig(ctx context.Context, ss *ServerSession, params *a2a.ListTaskPushNotificationConfigParams) (a2a.TaskPushNotificationConfigs, error)
 	DeleteTasksPushNotificationConfig(ctx context.Context, ss *ServerSession, params *a2a.DeleteTaskPushNotificationConfigParams) (*a2a.EmptyResult, error)
 	ResubscribeTasks(ctx context.Context, ss *ServerSession, params *a2a.TaskIDParams) (a2a.SendStreamingMessageResponse, error)
+	AuthenticatedExtendedCard(ctx context.Context, ss *ServerSession, params *a2a.EmptyParams) (*a2a.AgentCard, error)
 }
 
 // serverMethodInfo maps from the RPC method name to server [methodInfo].
@@ -52,6 +54,7 @@ var serverMethodInfo = map[a2a.Method]methodInfo{
 	a2a.MethodTasksPushNotificationConfigList:   newMethodInfo(serverMethod((Server).GetTasksPushNotificationConfig)),
 	a2a.MethodTasksPushNotificationConfigDelete: newMethodInfo(serverMethod((Server).DeleteTasksPushNotificationConfig)),
 	a2a.MethodTasksResubscribe:                  newMethodInfo(serverMethod((Server).ResubscribeTasks)),
+	a2a.MethodAgentAuthenticatedExtendedCard:    newMethodInfo(serverMethod((Server).AuthenticatedExtendedCard)),
 }
 
 // A ServerSession is a logical connection from a single A2A client. Its

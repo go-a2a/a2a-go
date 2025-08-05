@@ -113,12 +113,14 @@ var _ Transport = (*InMemoryTransport)(nil)
 // NewInMemoryTransports returns two InMemoryTransports that connect to each
 // other.
 func NewInMemoryTransports() (Transport, Transport) {
-	// Create buffered in-memory connections to avoid synchronization deadlocks
-	conn1 := &bufferedConn{ch: make(chan []byte, 100)}
-	conn2 := &bufferedConn{ch: make(chan []byte, 100)}
-	conn1.peer = conn2
-	conn2.peer = conn1
-	return &InMemoryTransport{ioTransport{conn1}}, &InMemoryTransport{ioTransport{conn2}}
+	c1, c2 := net.Pipe()
+	return &InMemoryTransport{ioTransport{c1}}, &InMemoryTransport{ioTransport{c2}}
+	// // Create buffered in-memory connections to avoid synchronization deadlocks
+	// conn1 := &bufferedConn{ch: make(chan []byte, 100)}
+	// conn2 := &bufferedConn{ch: make(chan []byte, 100)}
+	// conn1.peer = conn2
+	// conn2.peer = conn1
+	// return &InMemoryTransport{ioTransport{conn1}}, &InMemoryTransport{ioTransport{conn2}}
 }
 
 type Handler interface {
@@ -292,80 +294,80 @@ func (r rwc) Close() error {
 	return errors.Join(r.rc.Close(), r.wc.Close())
 }
 
-// bufferedConn implements [io.ReadWriteCloser] using buffered channels for in-memory transport.
-type bufferedConn struct {
-	ch     chan []byte
-	peer   *bufferedConn
-	closed bool
-	mu     sync.Mutex
-	buf    []byte // current read buffer
-}
-
-var _ io.ReadWriteCloser = (*bufferedConn)(nil)
-
-func (b *bufferedConn) Read(p []byte) (n int, err error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.closed {
-		return 0, io.EOF
-	}
-
-	// If we have data in our current buffer, read from it first
-	if len(b.buf) > 0 {
-		n = copy(p, b.buf)
-		b.buf = b.buf[n:]
-		return n, nil
-	}
-
-	// Get new data from channel (blocking)
-	b.mu.Unlock() // Unlock before blocking read
-	data, ok := <-b.ch
-	b.mu.Lock() // Re-lock after read
-
-	if !ok {
-		return 0, io.EOF
-	}
-	n = copy(p, data)
-	if n < len(data) {
-		// Store remaining data for next read
-		b.buf = data[n:]
-	}
-	return n, nil
-}
-
-func (b *bufferedConn) Write(p []byte) (n int, err error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.closed || b.peer == nil {
-		return 0, io.ErrClosedPipe
-	}
-
-	// Make a copy of the data to send
-	data := make([]byte, len(p))
-	copy(data, p)
-
-	// Send to peer's channel (non-blocking)
-	select {
-	case b.peer.ch <- data:
-		return len(p), nil
-	default:
-		// Channel full, return error
-		return 0, errors.New("write would block")
-	}
-}
-
-func (b *bufferedConn) Close() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if !b.closed {
-		b.closed = true
-		close(b.ch)
-	}
-	return nil
-}
+// // bufferedConn implements [io.ReadWriteCloser] using buffered channels for in-memory transport.
+// type bufferedConn struct {
+// 	ch     chan []byte
+// 	peer   *bufferedConn
+// 	closed bool
+// 	mu     sync.Mutex
+// 	buf    []byte // current read buffer
+// }
+//
+// var _ io.ReadWriteCloser = (*bufferedConn)(nil)
+//
+// func (b *bufferedConn) Read(p []byte) (n int, err error) {
+// 	b.mu.Lock()
+// 	defer b.mu.Unlock()
+//
+// 	if b.closed {
+// 		return 0, io.EOF
+// 	}
+//
+// 	// If we have data in our current buffer, read from it first
+// 	if len(b.buf) > 0 {
+// 		n = copy(p, b.buf)
+// 		b.buf = b.buf[n:]
+// 		return n, nil
+// 	}
+//
+// 	// Get new data from channel (blocking)
+// 	b.mu.Unlock() // Unlock before blocking read
+// 	data, ok := <-b.ch
+// 	b.mu.Lock() // Re-lock after read
+//
+// 	if !ok {
+// 		return 0, io.EOF
+// 	}
+// 	n = copy(p, data)
+// 	if n < len(data) {
+// 		// Store remaining data for next read
+// 		b.buf = data[n:]
+// 	}
+// 	return n, nil
+// }
+//
+// func (b *bufferedConn) Write(p []byte) (n int, err error) {
+// 	b.mu.Lock()
+// 	defer b.mu.Unlock()
+//
+// 	if b.closed || b.peer == nil {
+// 		return 0, io.ErrClosedPipe
+// 	}
+//
+// 	// Make a copy of the data to send
+// 	data := make([]byte, len(p))
+// 	copy(data, p)
+//
+// 	// Send to peer's channel (non-blocking)
+// 	select {
+// 	case b.peer.ch <- data:
+// 		return len(p), nil
+// 	default:
+// 		// Channel full, return error
+// 		return 0, errors.New("write would block")
+// 	}
+// }
+//
+// func (b *bufferedConn) Close() error {
+// 	b.mu.Lock()
+// 	defer b.mu.Unlock()
+//
+// 	if !b.closed {
+// 		b.closed = true
+// 		close(b.ch)
+// 	}
+// 	return nil
+// }
 
 // ioConn is a transport that delimits messages with newlines across
 // a bidirectional stream, and supports jsonrpc.2 message batching.

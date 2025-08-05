@@ -19,7 +19,7 @@ package auth
 import (
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
+	gocmp "github.com/google/go-cmp/cmp"
 )
 
 // TestUserInterface verifies that UnauthenticatedUser implements the User interface.
@@ -45,7 +45,7 @@ func TestUnauthenticatedUser_IsAuthenticated(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := tt.user.IsAuthenticated()
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if diff := gocmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("IsAuthenticated() mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -70,7 +70,7 @@ func TestUnauthenticatedUser_UserName(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := tt.user.UserName()
-			if diff := cmp.Diff(tt.want, got); diff != "" {
+			if diff := gocmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("UserName() mismatch (-want +got):\n%s", diff)
 			}
 		})
